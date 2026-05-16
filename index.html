@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>GRAIN - Cotización</title>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel para JSX en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- jsPDF & AutoTable -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f7f9f8;
+            color: #333;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+
+        // --- GOOGLE SHEETS CONFIG ---
+        const SHEETS_ID = '2PACX-1vRhbMuXXa9YEBWolz2tKragjideL-BH2alvA697LD6OiBDolcRlONXMnvSZdE8D7WGPgcZHrujo9Du4';
+        const SHEETS_BASE = `https://docs.google.com/spreadsheets/d/e/${SHEETS_ID}/pub?output=csv&sheet=`;
+
+        // Parser de CSV robusto (maneja campos con comas entre comillas)
+        const parseCSV = (text) => {
+            const lines = text.trim().split(/\r?\n/);
+            if (lines.length < 2) return [];
+            const parseRow = (line) => {
+                const vals = [];
+                let cur = '', inQ = false;
+                for (let i = 0; i < line.length; i++) {
+                    if (line[i] === '"') { inQ = !inQ; }
+                    else if (line[i] === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+                    else { cur += line[i]; }
+                }
+                vals.push(cur.trim());
+                return vals;
+            };
+            const headers = parseRow(lines[0]);
+            return lines.slice(1).map(line => {
+                const vals = parseRow(line);
+                const obj = {};
+                headers.forEach((h, i) => { obj[h] = vals[i] !== undefined ? vals[i] : ''; });
+                return obj;
+            }).filter(row => Object.values(row).some(v => v !== ''));
+        };
+
+        // --- CONSTANTES Y LÓGICA DE NEGOCIO ---
+        // Estas constantes sirven como estructura inicial / fallback si Sheets no está disponible
+        const INITIAL_MZ = [
+            { id: 'NK 800TGCL', price: 155 },
+            { id: 'NK 825VIP3 CL', price: 205 },
+            { id: 'NK 842VIP3', price: 215 },
+            { id: 'NK 855VIP3', price: 190 },
+            { id: 'NK 870VIP3', price: 210 },
+            { id: 'NK 835VIP3', price: 210 },
+            { id: 'SYN126 TGPLUS', price: 100 },
+            { id: 'SYN126 VIP3', price: 175 },
+            { id: 'SX 7331 TGPLUS', price: 140 },
+            { id: 'SYN 505 VIP3', price: 170 },
+            { id: 'SYN 840 VIP3/4', price: 170 },
+            { id: 'SYN 840 TG PLUS', price: 120 }
+        ];
+
+        const INITIAL_GS = [
+            { id: 'SYN 4066', price: 290 },
+            { id: 'SY3939 CL', price: 345 },
+            { id: 'SYN3970 CL', price: 380 },
+            { id: 'NK 3949 CL', price: 380 },
+            { id: 'SYN 4070 CL', price: 290 },
+            { id: 'NK 3979 CLHO', price: 410 },
+            { id: 'NK 3969 CL', price: 385 }
+        ];
+
+        const MAIZE_BANDS = { 'B1': 1.00, 'B2': 0.97, 'B3': 0.88, 'B4': 0.85 };
+        const SUNFLOWER_BANDS = { 'G0-G2': 1.00, 'G3': 0.97, 'G4': 0.80 };
+
+        const DISTRIBUTOR_FACTORS = {
+            'Productor': 1.00,
+            'Comercio': 0.94,
+            'DS NK': 0.90,
+            'Estratégico': 0.94,
+            'Megafarmer': 0.85,
+            'Agencia': 0.98
+        };
+
+        const PAYMENT_FACTORS = {
+            'Canje Cosecha 2027 / AVC (mz)': 0.97,
+            'Financiación en dólares': 1.00,
+            'Canje Corto ENE 2027 AVC (gir)': 0.97,
+            'CDO/Tarjeta/Préstamo/Canje Disponible': 0.92,
+            'SGR': 0.92
+
+        };
+
+        // --- STOCK INICIAL ---
+        const INITIAL_STOCK = [
+          {id:1,cat:'Bio Estimulante',name:'Biosalmon',price:6.50,expiry:'2025-03-20',notes:'3 L/Ha',qty:0},
+          {id:2,cat:'Bio Insecticida',name:'Mulsanne (Isaria fumosorosea) x5l',price:33.00,expiry:'2026-01-16',notes:'500 cc/ha',qty:0},
+          {id:3,cat:'Bioestimulante/fertilizante',name:'Bioforge Advanced',price:35.00,expiry:'2025-09-27',notes:'dosis 0,5 l/ha',qty:0},
+          {id:4,cat:'Bioestimulante/fertilizante',name:'Nitrobac (Gluconacetobacter)',price:37.80,expiry:'2025-10-20',notes:'dosis 400 cc/ha en Mz',qty:0},
+          {id:5,cat:'Bioestimulante/fertilizante',name:'Nitroplus 18 x 20 L',price:3.68,expiry:'2024-12-30',notes:'Mz:10 l/ha',qty:0},
+          {id:6,cat:'Bioestimulante/fertilizante',name:'Nutrimins Semilla',price:9.00,expiry:'2025-04-29',notes:'para vender solo',qty:0},
+          {id:7,cat:'Bioestimulante/fertilizante',name:'Nutrition Grow',price:22.20,expiry:'2026-02-26',notes:'500 cc/ha en soja y maíz',qty:0},
+          {id:8,cat:'Bioestimulante/fertilizante',name:'Pack 360 Trigo Nutrimins Semilla',price:7.50,expiry:'2025-04-29',notes:'500 cc c/100 kilos - Pack con Stimulate (2:1)',qty:0},
+          {id:9,cat:'Bioestimulante/fertilizante',name:'Pack 360 Trigo Stimulate',price:50.00,expiry:'2025-04-29',notes:'265 cc/ha - Pack con Nutrimins (1:2)',qty:0},
+          {id:10,cat:'Bioestimulante/fertilizante',name:'Phytogard Zinc x 20L',price:0,expiry:'',notes:'1 l/ha',qty:0},
+          {id:11,cat:'Bioestimulante/fertilizante',name:'Sett x 20 Lts',price:8.05,expiry:'2025-09-19',notes:'2 l/ha',qty:0},
+          {id:12,cat:'Bioestimulante/fertilizante',name:'SOGIX',price:14.95,expiry:'2026-01-05',notes:'300 cc/ha',qty:0},
+          {id:13,cat:'Bioestimulante/fertilizante',name:'Start Fert x 10 Litros',price:5.18,expiry:'2026-01-16',notes:'Dosis: 2 litros x ha',qty:0},
+          {id:14,cat:'Bioestimulante/fertilizante',name:'Stimulate trihormonal x 20L',price:57.50,expiry:'2025-04-29',notes:'250 cc/ha - Venta Solo',qty:0},
+          {id:15,cat:'Bioestimulante/fertilizante',name:'Stingray x1L',price:21.84,expiry:'2025-10-20',notes:'dosis 500 cc/ha',qty:0},
+          {id:16,cat:'Bioestimulante/fertilizante',name:'Zetrix',price:14.50,expiry:'2026-01-12',notes:'dosis 300 cc/ha',qty:0},
+          {id:17,cat:'Coadyuvante',name:'Antideriva Nova',price:43.68,expiry:'2025-08-07',notes:'30 cc C/100 de Agua',qty:0},
+          {id:18,cat:'Coadyuvante',name:'Antiespuma Nova - CHANCE',price:70.56,expiry:'2025-08-07',notes:'',qty:0},
+          {id:19,cat:'Coadyuvante',name:'Bolt',price:3.60,expiry:'2025-11-03',notes:'',qty:0},
+          {id:20,cat:'Coadyuvante',name:'BREAK-THRU',price:45.89,expiry:'2025-01-16',notes:'25-50 c/100L',qty:0},
+          {id:21,cat:'Coadyuvante',name:'BREAK-THRU + MSO MAX x10L',price:13.20,expiry:'2025-08-07',notes:'200-250 cc/ha',qty:0},
+          {id:22,cat:'Coadyuvante',name:'Centauro (Sulfato de Amonio)',price:2.99,expiry:'2025-12-24',notes:'300 a 400gr/ha',qty:0},
+          {id:23,cat:'Coadyuvante',name:'Coadyuvante Exito',price:17.92,expiry:'2025-10-24',notes:'Exito versión vieja - descuento 10%',qty:0},
+          {id:24,cat:'Coadyuvante',name:'CORRECTOR H NOVA',price:14.56,expiry:'2025-08-07',notes:'',qty:0},
+          {id:25,cat:'Coadyuvante',name:'Lemur',price:7.75,expiry:'2025-08-07',notes:'',qty:0},
+          {id:26,cat:'Coadyuvante',name:'Samplex (Sulfato de Amonio líquido) x 15 kilos',price:1.44,expiry:'2026-01-28',notes:'Precio por kilo - Dosis: 0,5% v/v',qty:0},
+          {id:27,cat:'Coadyuvante',name:'Superlimpiador Nova',price:19.20,expiry:'2025-08-07',notes:'',qty:0},
+          {id:28,cat:'Coadyuvante',name:'TROP L limpiador',price:44.27,expiry:'2026-01-19',notes:'',qty:0},
+          {id:29,cat:'Coadyuvante',name:'TROP-CS',price:29.75,expiry:'2025-08-26',notes:'20-50 c/100L',qty:0},
+          {id:30,cat:'Coadyuvante',name:'TropGreen',price:26.88,expiry:'2026-01-16',notes:'Dosis: 100 cc/ha',qty:0},
+          {id:31,cat:'Coadyuvante',name:'Versión',price:2.54,expiry:'2025-10-24',notes:'',qty:0},
+          {id:32,cat:'Coadyuvante',name:'XION ACTIVEGEL',price:82.95,expiry:'2025-11-03',notes:'50 a 70 cc c/100 lt de agua',qty:0},
+          {id:33,cat:'Coadyuvante',name:'XION SILICONGEL',price:94.21,expiry:'2025-11-03',notes:'25-50cc/ha',qty:0},
+          {id:34,cat:'Fertilizante',name:'Amauta Micro (10-27)',price:2.20,expiry:'2025-08-07',notes:'',qty:0},
+          {id:35,cat:'Fertilizante',name:'Amauta Micro (10-40)',price:2.55,expiry:'2026-03-27',notes:'Sin tasa a dic 2026 (hasta 60 Tn)',qty:0},
+          {id:36,cat:'Fertilizante',name:'Amauta Micro + Plus (10-46)',price:2.70,expiry:'2025-08-07',notes:'Si +1000 kilos puesto a campo',qty:0},
+          {id:37,cat:'Fertilizante',name:'Novastart FBN BIO',price:0,expiry:'2025-11-27',notes:'x 20 - 600 y 1000 kilos - Fin a Julio sin Tasa',qty:0},
+          {id:38,cat:'Fertilizante',name:'Novastart Max',price:0,expiry:'',notes:'x 20 - 600 y 1000 kilos - Fin a Julio sin tasa',qty:0},
+          {id:39,cat:'Fertilizante foliar',name:'Maximum (N;Mo;Bo) x5L',price:30.00,expiry:'2025-01-21',notes:'',qty:0},
+          {id:40,cat:'Fertilizante foliar',name:'Microquel Amin Cuaje',price:13.34,expiry:'2025-08-07',notes:'Dosis 1,5 kg',qty:0},
+          {id:41,cat:'Fertilizante foliar',name:'Vigorion',price:13.50,expiry:'2025-08-07',notes:'1 a 2 litros /ha',qty:0},
+          {id:42,cat:'Fertilizante foliar',name:'Wayra K Plus',price:4.50,expiry:'2025-08-07',notes:'1 kilo + 0,5 l de vigorion',qty:0},
+          {id:43,cat:'Fertilizante foliar',name:'Wayra NS Amauta',price:2.82,expiry:'2025-08-07',notes:'Dosis 8 kilos/ha',qty:0},
+          {id:44,cat:'Fertilizante foliar',name:'Ziman',price:8.40,expiry:'2025-08-07',notes:'',qty:0},
+          {id:45,cat:'Fungicida',name:'Azoxcy PRO Insuagro',price:13.16,expiry:'2026-02-03',notes:'CyO',qty:0},
+          {id:46,cat:'Fungicida',name:'Freedom x 5L',price:13.15,expiry:'2026-02-03',notes:'250 cc/ha soja - 500 cc/ha Maiz',qty:0},
+          {id:47,cat:'Fungicida',name:'Miravis Duo',price:41.23,expiry:'2026-01-05',notes:'',qty:0},
+          {id:48,cat:'Fungicida',name:'Pancho Triple pack',price:304.50,expiry:'2025-02-13',notes:'pack x 20 has',qty:0},
+          {id:49,cat:'Fungicida',name:'Tebuco Delta 43',price:10.35,expiry:'2025-12-13',notes:'',qty:0},
+          {id:50,cat:'Fungicida Biológico',name:'Trichodermil Coppert',price:24.00,expiry:'2025-09-05',notes:'300cc/100kg sem soja',qty:0},
+          {id:51,cat:'Granos Almacenados',name:'K-obiol',price:47.25,expiry:'2026-01-13',notes:'Vencido, precio con descuento aplicado',qty:0},
+          {id:52,cat:'Granos Almacenados',name:'Onza Max',price:36.04,expiry:'2025-08-07',notes:'',qty:0},
+          {id:53,cat:'Granos Almacenados',name:'Quickphos (fosfuro de aluminio) - x tubo 30 pastillas',price:3.75,expiry:'2026-01-30',notes:'NO vender menos de 16 tubos (una lata)',qty:0},
+          {id:54,cat:'Herbicida',name:'2,4 D Etil Hexil (89%) DELTA x 20L',price:4.75,expiry:'2025-11-03',notes:'',qty:0},
+          {id:55,cat:'Herbicida',name:'2,4 D Etil Hexil 102,5%',price:0,expiry:'2025-11-03',notes:'',qty:0},
+          {id:56,cat:'Herbicida',name:'2,4 D Herbifen Advance',price:0,expiry:'2025-05-27',notes:'',qty:0},
+          {id:57,cat:'Herbicida',name:'2,4 D Voleris',price:6.10,expiry:'2025-12-20',notes:'',qty:0},
+          {id:58,cat:'Herbicida',name:'2,4D enlist',price:5.31,expiry:'2025-11-10',notes:'',qty:0},
+          {id:59,cat:'Herbicida',name:'Acuron Pack',price:464.02,expiry:'2025-10-18',notes:'',qty:0},
+          {id:60,cat:'Herbicida',name:'Acuron Uno',price:40.65,expiry:'2025-10-17',notes:'',qty:0},
+          {id:61,cat:'Herbicida',name:'Arkadia (isoxaflutol + mesotrione)',price:33.86,expiry:'2025-11-03',notes:'',qty:0},
+          {id:62,cat:'Herbicida',name:'Atrazina Atramyl x 15 kg',price:5.48,expiry:'2025-12-13',notes:'1 kg/ha',qty:0},
+          {id:63,cat:'Herbicida',name:'Atrazina Delta x10 kg',price:5.51,expiry:'2025-11-03',notes:'SOLO 10 KILOS DE STOCK',qty:0},
+          {id:64,cat:'Herbicida',name:'Atrazina Gesaprim 90 x10Kg',price:7.18,expiry:'2025-10-01',notes:'',qty:0},
+          {id:65,cat:'Herbicida',name:'BLADE NOVA fluroxipir',price:19.98,expiry:'2026-01-24',notes:'CyO',qty:0},
+          {id:66,cat:'Herbicida',name:'Borja',price:39.33,expiry:'2025-10-17',notes:'',qty:0},
+          {id:67,cat:'Herbicida',name:'Carfrentazone Affinity',price:95.04,expiry:'2025-08-07',notes:'',qty:0},
+          {id:68,cat:'Herbicida',name:'Cletodim 24 Delta x 20 Litros',price:0,expiry:'',notes:'SIN STOCK - Ver Cleto Nova',qty:0},
+          {id:69,cat:'Herbicida',name:'Cletodim nova 24% x 20 Lts',price:8.19,expiry:'2026-02-12',notes:'Stock Disponible',qty:0},
+          {id:70,cat:'Herbicida',name:'Cletodim Traspect (Syngenta) x 20 lts',price:0,expiry:'',notes:'',qty:0},
+          {id:71,cat:'Herbicida',name:'Clopyralid Nova',price:34.56,expiry:'2025-08-07',notes:'dosis: 120 a 200 cc',qty:0},
+          {id:72,cat:'Herbicida',name:'Clorimuron',price:60.50,expiry:'2025-08-07',notes:'',qty:0},
+          {id:73,cat:'Herbicida',name:'Convey',price:321.00,expiry:'2025-12-27',notes:'',qty:0},
+          {id:74,cat:'Herbicida',name:'Corsaire (Imazapic 31,8% + Imazapir 10,7%)',price:43.95,expiry:'2025-08-07',notes:'',qty:0},
+          {id:75,cat:'Herbicida',name:'Dicamba',price:7.16,expiry:'2025-11-03',notes:'',qty:0},
+          {id:76,cat:'Herbicida',name:'Diclosulam Delta x 1 kilo',price:156.60,expiry:'2025-10-07',notes:'',qty:0},
+          {id:77,cat:'Herbicida',name:'Diclosulam Spider',price:237.62,expiry:'2025-08-21',notes:'',qty:0},
+          {id:78,cat:'Herbicida',name:'Diclosulam x 0,5 kg',price:158.05,expiry:'2025-09-05',notes:'',qty:0},
+          {id:79,cat:'Herbicida',name:'Diflufenican 50%',price:24.84,expiry:'2025-10-21',notes:'',qty:0},
+          {id:80,cat:'Herbicida',name:'Diuron',price:13.75,expiry:'2025-08-22',notes:'',qty:0},
+          {id:81,cat:'Herbicida',name:'Dual Gold (S-Metalocloro)',price:10.75,expiry:'2024-08-15',notes:'',qty:0},
+          {id:82,cat:'Herbicida',name:'Fierce (Flumioxazin 15% + Pyroxasulfone 34,5%)',price:73.70,expiry:'2025-09-05',notes:'',qty:0},
+          {id:83,cat:'Herbicida',name:'Finesse / Stern',price:251.00,expiry:'2025-07-15',notes:'vence Feb 2026',qty:0},
+          {id:84,cat:'Herbicida',name:'Flumioxazin 48%',price:19.80,expiry:'2025-11-03',notes:'',qty:0},
+          {id:85,cat:'Herbicida',name:'Fomesafen Atanor x 10 Lt',price:6.30,expiry:'2025-09-29',notes:'vencido - Nov 2025',qty:0},
+          {id:86,cat:'Herbicida',name:'Fomesafen x 20lt',price:6.91,expiry:'2025-11-03',notes:'',qty:0},
+          {id:87,cat:'Herbicida',name:'Gemmit Top (Flumi)',price:34.50,expiry:'2024-10-15',notes:'',qty:0},
+          {id:88,cat:'Herbicida',name:'Glifo Control Max 79.2% -Bayer-',price:6.45,expiry:'2025-12-30',notes:'',qty:0},
+          {id:89,cat:'Herbicida',name:'Glifo G62 Tecnomyl sal62%',price:4.06,expiry:'2026-02-12',notes:'',qty:0},
+          {id:90,cat:'Herbicida',name:'Glifo La Tijereta Box',price:0,expiry:'',notes:'SIN STOCK - Ver Control Max o Touchdown',qty:0},
+          {id:91,cat:'Herbicida',name:'Glifo Power Plus atanor 64,5%',price:0,expiry:'',notes:'SIN STOCK - Ver G62',qty:0},
+          {id:92,cat:'Herbicida',name:'Glifo Sulfosato TD 62%',price:4.35,expiry:'2025-12-30',notes:'',qty:0},
+          {id:93,cat:'Herbicida',name:'Glifo Touchdown Max 75.2% -Syngenta- x 10 kilos',price:6.12,expiry:'2025-12-30',notes:'',qty:0},
+          {id:94,cat:'Herbicida',name:'Glufosinato de amonio 60% Helios Plus x 20 Litros',price:10.94,expiry:'2026-01-02',notes:'Dosis 0,5-0,7L/Ha - SIN STOCK',qty:0},
+          {id:95,cat:'Herbicida',name:'Glufosinato de Amonio Delta/Insuagro 20%',price:0,expiry:'2025-11-03',notes:'SIN STOCK - Ver Helios',qty:0},
+          {id:96,cat:'Herbicida',name:'Haloxi 81%',price:29.00,expiry:'2025-06-23',notes:'Vencido Nov 2024',qty:0},
+          {id:97,cat:'Herbicida',name:'Haloxifop 54%',price:19.80,expiry:'2025-08-22',notes:'',qty:0},
+          {id:98,cat:'Herbicida',name:'Haloxifop 54% Delta CyO',price:18.45,expiry:'2025-10-07',notes:'',qty:0},
+          {id:99,cat:'Herbicida',name:'Haloxifop 93,5%',price:34.65,expiry:'2025-08-22',notes:'',qty:0},
+          {id:100,cat:'Herbicida',name:'Haloxifop 90% Galant max',price:44.23,expiry:'2025-10-21',notes:'',qty:0},
+          {id:101,cat:'Herbicida',name:'Heat',price:317.52,expiry:'2025-11-27',notes:'',qty:0},
+          {id:102,cat:'Herbicida',name:'Imazapir 48 Delta',price:0,expiry:'2025-10-07',notes:'SIN STOCK - Ver Maza',qty:0},
+          {id:103,cat:'Herbicida',name:'Imazapir 48% Maza GLEBA',price:33.32,expiry:'2025-12-23',notes:'',qty:0},
+          {id:104,cat:'Herbicida',name:'Imazetapyr 10% (Delta)',price:4.75,expiry:'2025-10-07',notes:'SIN STOCK - Ver Xcalivur',qty:0},
+          {id:105,cat:'Herbicida',name:'Imazetapyr 10% Xcalibur (Nova) 4x5Lts',price:4.87,expiry:'2025-11-21',notes:'',qty:0},
+          {id:106,cat:'Herbicida',name:'Ligate',price:165.00,expiry:'2025-10-20',notes:'',qty:0},
+          {id:107,cat:'Herbicida',name:'Metribuzin Insuagro',price:0,expiry:'2024-09-20',notes:'',qty:0},
+          {id:108,cat:'Herbicida',name:'Metribuzin 70 wg Tribune solido',price:0,expiry:'2024-10-22',notes:'',qty:0},
+          {id:109,cat:'Herbicida',name:'Metsulfuron',price:0,expiry:'2025-05-12',notes:'',qty:0},
+          {id:110,cat:'Herbicida',name:'Nicosulfuron 75% (sobre 200Gr.)',price:150.12,expiry:'2025-11-03',notes:'',qty:0},
+          {id:111,cat:'Herbicida',name:'Nicosulfuron 75% Delta (sobre 200Gr. o x 300 gr)',price:147.15,expiry:'2025-11-03',notes:'',qty:0},
+          {id:112,cat:'Herbicida',name:'Nicosulfuron LPU 4% (Insuagro)',price:12.27,expiry:'2025-12-30',notes:'Dosis: 1 a 1,1 Litros',qty:0},
+          {id:113,cat:'Herbicida',name:'Ontario (Imazapir 30,4%) NOVA',price:24.20,expiry:'2025-08-07',notes:'',qty:0},
+          {id:114,cat:'Herbicida',name:'On duty',price:122.36,expiry:'2024-10-28',notes:'',qty:0},
+          {id:115,cat:'Herbicida',name:'Pacto x 360gr',price:421.72,expiry:'2025-01-29',notes:'50 gr/ha Para Rama Negra',qty:0},
+          {id:116,cat:'Herbicida',name:'Paraquat x 20 litros',price:3.47,expiry:'2025-12-13',notes:'STOCK A CONFIRMAR',qty:0},
+          {id:117,cat:'Herbicida',name:'Percutor',price:275.00,expiry:'2025-10-21',notes:'',qty:0},
+          {id:118,cat:'Herbicida',name:'Picloram Nova',price:6.70,expiry:'2025-12-13',notes:'',qty:0},
+          {id:119,cat:'Herbicida',name:'Piroxasulfone 48% YAMATO TOP',price:87.58,expiry:'2025-11-10',notes:'',qty:0},
+          {id:120,cat:'Herbicida',name:'Piroxasulfone 85% Nova',price:140.40,expiry:'2025-10-21',notes:'',qty:0},
+          {id:121,cat:'Herbicida',name:'Preludio (haloxifop 20%+Quizalofop 20%+version)',price:174.37,expiry:'2025-12-22',notes:'pack para 20 has',qty:0},
+          {id:122,cat:'Herbicida',name:'Prometrina',price:6.96,expiry:'2025-09-11',notes:'',qty:0},
+          {id:123,cat:'Herbicida',name:'S-Metalocloro Delta',price:6.29,expiry:'2025-11-03',notes:'',qty:0},
+          {id:124,cat:'Herbicida',name:'S-Metalocloro genérico x 20 L',price:6.62,expiry:'2025-12-23',notes:'',qty:0},
+          {id:125,cat:'Herbicida',name:'sulfentrazone Capaz/Solara',price:20.62,expiry:'2025-10-07',notes:'',qty:0},
+          {id:126,cat:'Herbicida',name:'Terbutilazina 50 DELTA o Insuagro',price:6.73,expiry:'2025-11-03',notes:'',qty:0},
+          {id:127,cat:'Herbicida',name:'Terbyne 75',price:12.89,expiry:'',notes:'',qty:0},
+          {id:128,cat:'Herbicida',name:'Velocity 54%',price:20.95,expiry:'2025-09-05',notes:'',qty:0},
+          {id:129,cat:'Herbicida',name:'Voleris',price:5.61,expiry:'2025-11-21',notes:'',qty:0},
+          {id:130,cat:'Herbicida',name:'Voraxor',price:127.90,expiry:'2025-11-15',notes:'',qty:0},
+          {id:131,cat:'Herbicida',name:'Zidua PAck',price:792.05,expiry:'2024-09-20',notes:'',qty:0},
+          {id:132,cat:'Inoculante',name:'Nitrasilo (Pcio x frasco de 300 gr)',price:135.00,expiry:'2025-02-24',notes:'300 grs/silo cada 200 Tn',qty:0},
+          {id:133,cat:'Insecticida',name:'Abamectina 1,8%',price:6.10,expiry:'2025-10-07',notes:'',qty:0},
+          {id:134,cat:'Insecticida',name:'Abamectina 3,6%',price:10.58,expiry:'2025-12-13',notes:'100-150 cc/ha',qty:0},
+          {id:135,cat:'Insecticida',name:'Bifentrin 25% Delta 12x1L',price:17.28,expiry:'2025-11-03',notes:'',qty:0},
+          {id:136,cat:'Insecticida',name:'Bifentrin Nova 10%',price:7.34,expiry:'2025-10-01',notes:'',qty:0},
+          {id:137,cat:'Insecticida',name:'Clorantraniliprole 20% 12x1 Lt',price:50.00,expiry:'2026-02-18',notes:'',qty:0},
+          {id:138,cat:'Insecticida',name:'Clorantraniliprole 20% GLOCK (generico)',price:50.00,expiry:'2026-02-18',notes:'',qty:0},
+          {id:139,cat:'Insecticida',name:'Coragen/Vesticor',price:76.30,expiry:'2025-12-23',notes:'',qty:0},
+          {id:140,cat:'Insecticida',name:'Cyclon Nova (Imida 20%+Lambda 7,5%+Bifentrin 5%)',price:28.34,expiry:'',notes:'200 cc/ha',qty:0},
+          {id:141,cat:'Insecticida',name:'Dimetoato Delta (40%)',price:7.99,expiry:'2025-11-03',notes:'800 cc/ha',qty:0},
+          {id:142,cat:'Insecticida',name:'Exalt',price:206.15,expiry:'2025-12-04',notes:'',qty:0},
+          {id:143,cat:'Insecticida',name:'Expedition/Silver',price:41.01,expiry:'2025-01-20',notes:'200 cc/ha',qty:0},
+          {id:144,cat:'Insecticida',name:'Furia (Zetametrina)',price:12.60,expiry:'2025-10-07',notes:'Vencido',qty:0},
+          {id:145,cat:'Insecticida',name:'Hellion (Lufenuron 16% + Benzoato emamectina 4%) x 1L',price:64.42,expiry:'2025-08-07',notes:'120 cc/ha',qty:0},
+          {id:146,cat:'Insecticida',name:'Kaiser - Excelso (tiametoxam 14% + lambda 10,6) x5L',price:16.65,expiry:'2026-02-03',notes:'200 cc/ha',qty:0},
+          {id:147,cat:'Insecticida',name:'Lufen + Profenofos Delta',price:15.66,expiry:'2025-08-07',notes:'500 cc/ha',qty:0},
+          {id:148,cat:'Insecticida',name:'Lufenuron 5% Natiur (Gleba)',price:7.72,expiry:'2025-12-13',notes:'',qty:0},
+          {id:149,cat:'Insecticida',name:'Manto Lamdacialotrina',price:20.30,expiry:'2025-12-23',notes:'',qty:0},
+          {id:150,cat:'Insecticida',name:'Metoxifenocide 24% INTREPID',price:31.90,expiry:'2025-10-07',notes:'',qty:0},
+          {id:151,cat:'Insecticida',name:'Metoxifenocide 24% Vest',price:24.09,expiry:'2025-10-07',notes:'',qty:0},
+          {id:152,cat:'Insecticida',name:'Pirate (Clorfenapir 24g)',price:19.80,expiry:'2025-12-04',notes:'800cc/ha',qty:0},
+          {id:153,cat:'Insecticida',name:'Transform (sufloxaflor)',price:243.86,expiry:'2026-02-05',notes:'40 gr/ha',qty:0},
+          {id:154,cat:'Insecticida',name:'Troya',price:32.55,expiry:'2025-01-20',notes:'175 a 220 cc/ha',qty:0},
+          {id:155,cat:'Insecticida',name:'Virantra x5 Lt',price:275.00,expiry:'2026-01-19',notes:'',qty:0},
+          {id:156,cat:'Insecticida',name:'Zodiac (Bifentrin 5%+Lufenuron 5%+Abamectina 0,7%)',price:22.00,expiry:'2025-03-19',notes:'300 cc/ha',qty:0},
+          {id:157,cat:'Otros',name:'Trampa Amarilla Horiver (x10 unidades)',price:25.00,expiry:'2026-01-14',notes:'',qty:0},
+          {id:158,cat:'Semilla',name:'Centeno C&N (U$S/kg)',price:0,expiry:'',notes:'big bags de 800 kilos',qty:0},
+          {id:159,cat:'Semilla',name:'Semilla de Trigo (Mancosem)',price:22.35,expiry:'2025-03-11',notes:'pcio x bolsa de 40 kilos',qty:0},
+          {id:160,cat:'Semilla',name:'Vicia C&N (U$S/kg)',price:2.00,expiry:'2025-03-11',notes:'En Big bags de 500 kilos',qty:0},
+          {id:161,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 100 m',price:480.00,expiry:'2026-03-27',notes:'',qty:0},
+          {id:162,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 100 m (x mas de 10)',price:472.94,expiry:'2025-03-28',notes:'',qty:0},
+          {id:163,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 75 m',price:374.50,expiry:'2026-03-27',notes:'',qty:0},
+          {id:164,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 75 m (x mas de 10)',price:359.64,expiry:'2026-02-03',notes:'',qty:0},
+          {id:165,cat:'Terápico semilla',name:'Apron maxx RFC x1l',price:50.80,expiry:'2024-08-22',notes:'',qty:0},
+          {id:166,cat:'Terápico semilla',name:'cruiser 60 x 20L',price:117.70,expiry:'2024-08-22',notes:'',qty:0},
+          {id:167,cat:'Terápico semilla',name:'Cruiser Plus',price:56.42,expiry:'2025-03-13',notes:'',qty:0},
+          {id:168,cat:'Terápico semilla',name:'Fipronil Action (fipronil 20%) TS',price:60.00,expiry:'2026-03-25',notes:'',qty:0},
+          {id:169,cat:'Terápico semilla',name:'Fiproxam Pack (2000Kg)',price:322.00,expiry:'2024-11-15',notes:'',qty:0},
+          {id:170,cat:'Terápico semilla',name:'Options Pack (4000Kg)',price:259.84,expiry:'2024-11-21',notes:'',qty:0},
+          {id:171,cat:'Terápico semilla',name:'Origen Pack',price:185.60,expiry:'2024-10-05',notes:'',qty:0},
+          {id:172,cat:'Terápico semilla',name:'Pack BIO DUO (2000kg)',price:185.60,expiry:'2024-08-12',notes:'',qty:0},
+          {id:173,cat:'Terápico semilla trigo',name:'Amigo (difeno + metalaxil)',price:25.30,expiry:'2026-04-01',notes:'150 cc/100 kg',qty:0},
+          {id:174,cat:'Terápico semilla trigo',name:'Azokop-L (vejigas x 2,5L)',price:0,expiry:'',notes:'Pcio x litro - 1 vejiga cada 500 kilos',qty:0},
+          {id:175,cat:'Terápico semilla trigo',name:'BIOKOP PACK TRIGO (Trichoderma+azospirillum)',price:78.00,expiry:'2026-04-01',notes:'1 caja c/1000 kilos',qty:0},
+          {id:176,cat:'Terápico semilla trigo',name:'Criollo (tebuco + imida)',price:14.04,expiry:'2026-04-01',notes:'Dosis 200cc c/100 kilos',qty:0},
+          {id:177,cat:'Terápico semilla trigo',name:'Curasemillas Nova (Thiram+carbendazim)',price:4.44,expiry:'2026-04-01',notes:'Dosis 250 cc c/100 kilos',qty:0},
+          {id:178,cat:'Terápico semilla trigo',name:'Flight (Difeno+imida)',price:20.70,expiry:'2026-04-01',notes:'Dosis 250 cc c/100 kilos',qty:0},
+          {id:179,cat:'Terápico semilla trigo',name:'PACK TRIGO (carbendazim+thiram+Azospirillum)',price:54.00,expiry:'2026-04-01',notes:'1 caja c/1000 kilos',qty:0},
+          {id:180,cat:'Terápico semilla trigo',name:'Promozion de Nova (Azospirillum) x caja',price:122.40,expiry:'2026-04-01',notes:'1 caja c/4000 kilos',qty:0},
+          {id:181,cat:'Terápico semilla trigo',name:'Tregua (Nuevo) Difeno+metalaxil+iprodione+imida',price:28.75,expiry:'2026-04-01',notes:'400 a 500 cc/100 kg',qty:0}
+        ];
+
+        // Helpers de vencimiento
+        const getExpiryStatus = (expiryStr) => {
+          if (!expiryStr) return 'none';
+          const today = new Date(); today.setHours(0,0,0,0);
+          const exp = new Date(expiryStr); exp.setHours(0,0,0,0);
+          const diff = Math.floor((exp - today) / 86400000);
+          if (diff < 0) return 'expired';
+          if (diff <= 90) return 'soon';
+          return 'ok';
+        };
+
+        const LOGO_BASE64 = 'data:image/png;base64,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';
+        // Hooks
+        const { useState, useEffect, useMemo } = React;
+
+        // --- COMPONENTE PRINCIPAL ---
+        function App() {
+            const [view, setView] = useState('quote'); // 'quote' | 'admin' | 'stock'
+            const [sheetsStatus, setSheetsStatus] = useState('idle'); // 'idle' | 'loading' | 'ok' | 'error'
+
+            // Inicializar desde localStorage (como caché)
+            const [maizePrices, setMaizePrices] = useState(() => {
+                const s = localStorage.getItem('grain_maize');
+                return s ? JSON.parse(s) : INITIAL_MZ;
+            });
+            const [sunflowerPrices, setSunflowerPrices] = useState(() => {
+                const s = localStorage.getItem('grain_sunflower');
+                return s ? JSON.parse(s) : INITIAL_GS;
+            });
+            const [stockData, setStockData] = useState(() => {
+                const s = localStorage.getItem('grain_stock');
+                return s ? JSON.parse(s) : INITIAL_STOCK;
+            });
+
+            // Cargar desde Google Sheets al montar
+            useEffect(() => {
+                const fetchSheets = async () => {
+                    setSheetsStatus('loading');
+                    try {
+                        const [resMz, resGs, resStock] = await Promise.all([
+                            fetch(SHEETS_BASE + 'Maiz'),
+                            fetch(SHEETS_BASE + 'Girasol'),
+                            fetch(SHEETS_BASE + 'Stock')
+                        ]);
+
+                        if (!resMz.ok || !resGs.ok || !resStock.ok) throw new Error('HTTP error');
+
+                        const [txtMz, txtGs, txtStock] = await Promise.all([
+                            resMz.text(), resGs.text(), resStock.text()
+                        ]);
+
+                        const mz = parseCSV(txtMz).map(r => ({ id: r.id, price: parseFloat(r.price) || 0 }));
+                        const gs = parseCSV(txtGs).map(r => ({ id: r.id, price: parseFloat(r.price) || 0 }));
+                        const stock = parseCSV(txtStock).map(r => ({
+                            id: parseInt(r.id) || Date.now(),
+                            cat: r.cat || '',
+                            name: r.name || '',
+                            price: parseFloat(r.price) || 0,
+                            expiry: r.expiry || '',
+                            notes: r.notes || '',
+                            qty: parseFloat(r.qty) || 0
+                        }));
+
+                        if (mz.length > 0) { setMaizePrices(mz); localStorage.setItem('grain_maize', JSON.stringify(mz)); }
+                        if (gs.length > 0) { setSunflowerPrices(gs); localStorage.setItem('grain_sunflower', JSON.stringify(gs)); }
+                        if (stock.length > 0) { setStockData(stock); localStorage.setItem('grain_stock', JSON.stringify(stock)); }
+
+                        setSheetsStatus('ok');
+                    } catch (err) {
+                        console.warn('Google Sheets no disponible, usando caché local:', err);
+                        setSheetsStatus('error');
+                    }
+                };
+                fetchSheets();
+            }, []);
+
+            // Guardar precios a localStorage (panel Admin)
+            const savePrices = (mz, gs) => {
+                localStorage.setItem('grain_maize', JSON.stringify(mz));
+                localStorage.setItem('grain_sunflower', JSON.stringify(gs));
+                setMaizePrices(mz);
+                setSunflowerPrices(gs);
+                alert("Precios guardados con éxito.");
+            };
+
+            const styles = {
+                header: { backgroundColor: '#0f4d22', padding: '15px 30px', color: '#d4af37', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+                title: { margin: 0, fontSize: '24px', fontWeight: 'bold' },
+                navBtn: { backgroundColor: 'transparent', color: '#d4af37', border: '1px solid #d4af37', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', margin: '0 5px' },
+                activeNavBtn: { backgroundColor: '#d4af37', color: '#0f4d22', border: '1px solid #d4af37', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', margin: '0 5px', fontWeight: 'bold' }
+            };
+
+            const statusBadge = {
+                loading: { text: '⏳ Sincronizando con Sheets...', color: '#856404', bg: '#fff3cd' },
+                ok:      { text: '✅ Datos actualizados desde Google Sheets', color: '#155724', bg: '#d4edda' },
+                error:   { text: '⚠️ Sin conexión a Sheets — usando datos locales', color: '#721c24', bg: '#f8d7da' },
+            }[sheetsStatus];
+
+            return (
+                <div>
+                    <div style={styles.header}>
+                        <h1 style={styles.title}>GRAIN - Semillas NK</h1>
+                        <div>
+                            <button style={view === 'quote' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('quote')}>Cotizador</button>
+                            <button style={view === 'admin' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('admin')}>Administrar Precios</button>
+                            <button style={view === 'stock' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('stock')}>📦 Stock</button>
+                        </div>
+                    </div>
+                    {statusBadge && (
+                        <div style={{ background: statusBadge.bg, color: statusBadge.color, textAlign: 'center', padding: '6px', fontSize: '13px', fontWeight: '500' }}>
+                            {statusBadge.text}
+                        </div>
+                    )}
+                    {view === 'quote' && <QuoteGenerator maizePrices={maizePrices} sunflowerPrices={sunflowerPrices} stockData={stockData} />}
+                    {view === 'admin' && <PriceAdmin maizePrices={maizePrices} sunflowerPrices={sunflowerPrices} onSave={savePrices} />}
+                    {view === 'stock' && <StockManager stockData={stockData} setStockData={setStockData} />}
+                </div>
+            );
+        }
+
+        // --- GENERADOR DE PDF: SEMILLAS ---
+        const generateSeedsPDF = (clientData, products, totalValue) => {
+            const doc = new window.jspdf.jsPDF();
+            const green = [15, 77, 34];
+            const W = doc.internal.pageSize.getWidth();
+
+            const addWatermark = (d) => {
+                const pw = d.internal.pageSize.getWidth(), ph = d.internal.pageSize.getHeight();
+                d.saveGraphicsState();
+                d.setGState(new window.jspdf.GState({ opacity: 0.06 }));
+                d.addImage(LOGO_BASE64, 'PNG', pw/2 - 45, ph/2 - 45, 90, 90);
+                d.restoreGraphicsState();
+            };
+            const hRule = (d, y) => { d.setDrawColor(200,200,200); d.setLineWidth(0.3); d.line(15, y, W-15, y); };
+
+            // ── PÁGINA 1 ──
+            addWatermark(doc);
+            doc.addImage(LOGO_BASE64, 'PNG', 15, 10, 35, 22);
+            let y = 38; hRule(doc, y);
+
+            y += 10;
+            doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(0,0,0);
+            doc.text('PROPUESTA COMERCIAL: SEMILLAS NK \u2013 CAMPA\u00d1A 2026', 15, y);
+
+            y += 10; doc.setFontSize(10);
+            doc.setFont('helvetica','bold'); doc.text('Fecha de Emisi\u00f3n: ', 15, y);
+            doc.setFont('helvetica','normal'); doc.text(new Date().toLocaleDateString('es-AR'), 15 + doc.getTextWidth('Fecha de Emisi\u00f3n: '), y);
+            y += 7;
+            doc.setFont('helvetica','bold'); doc.text('Vigencia de la Oferta: ', 15, y);
+            doc.setFont('helvetica','normal');
+            const vigT = 'Sujeto a disponibilidad de cupo para cada etapa de la precampa\u00f1a al momento de la confirmaci\u00f3n.';
+            const vigL = doc.splitTextToSize(vigT, W - 30 - doc.getTextWidth('Vigencia de la Oferta: '));
+            doc.text(vigL, 15 + doc.getTextWidth('Vigencia de la Oferta: '), y);
+            y += (vigL.length * 5) + 3;
+            doc.setFont('helvetica','bold'); doc.text('CLIENTE: ', 15, y);
+            doc.setFont('helvetica','normal'); doc.text(clientData.clientName || 'Sin especificar', 15 + doc.getTextWidth('CLIENTE: '), y);
+            y += 7;
+            doc.setFont('helvetica','bold'); doc.text('COMERCIAL: ', 15, y);
+            doc.setFont('helvetica','normal'); doc.text(clientData.comercial || 'Alejandro Etchegorry', 15 + doc.getTextWidth('COMERCIAL: '), y);
+            y += 8; hRule(doc, y);
+
+            // Sección 1
+            y += 8;
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...green);
+            doc.text('1. DETALLE DE PRODUCTOS', 15, y); doc.setTextColor(0,0,0); y += 4;
+
+            const tableData = products.map(p => [p.hybrid, p.band, p.quantity, p.unitPrice > 0 ? parseFloat(p.unitPrice).toFixed(2) : 'a definir', p.obs || '']);
+            doc.autoTable({
+                startY: y,
+                head: [['H\u00cdBRIDO','Banda','Cantidad','Precio','Observaciones']],
+                body: tableData,
+                headStyles: { fillColor: [255,255,255], textColor: [0,0,0], fontStyle: 'bold', lineColor: [180,180,180], lineWidth: 0.3 },
+                bodyStyles: { textColor: [0,0,0], lineColor: [220,220,220], lineWidth: 0.2 },
+                alternateRowStyles: { fillColor: [245,245,245] },
+                columnStyles: { 0:{cellWidth:55}, 1:{cellWidth:18,halign:'center'}, 2:{cellWidth:22,halign:'center'}, 3:{cellWidth:25,halign:'center'}, 4:{cellWidth:'auto'} },
+                styles: { fontSize: 9, cellPadding: 3 }, theme: 'grid'
+            });
+            y = doc.lastAutoTable.finalY + 5;
+            doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(60,60,60);
+            doc.text('Contenido por bolsa: Todos los h\u00edbridos se comercializan en bolsas de 180.000 semillas.', 15, y); y += 5;
+            doc.setFont('helvetica','italic');
+            const pnL = doc.splitTextToSize('El precio se garantiza sobre la banda de precios seleccionada; el grado o calibre queda sujeto a disponibilidad de despacho.', W-30);
+            doc.text(pnL, 15, y); y += pnL.length * 4.5 + 6;
+
+            // Sección 2
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...green);
+            doc.text('2. CONDICIONES FINANCIERAS Y FORMAS DE PAGO', 15, y); doc.setTextColor(0,0,0); y += 6;
+            doc.setFont('helvetica','italic'); doc.setFontSize(9.5);
+            doc.text('Eleg\u00ed la opci\u00f3n que mejor se adapte a tu flujo:', 15, y); y += 6;
+            const payOpts = [
+                { title: 'CANJE / FINANCIADO en U$S', subs: [`Vencimiento: ${clientData.canjeVencimiento || 'MAYO 2027'}`, 'Facturaci\u00f3n: Directa desde Syngenta Agro S.A.'] },
+                { title: 'PAGO CONTADO / DISPONIBLE', subs: [`Descuento a aplicar: ${clientData.descContado || '8%'} sobre precio de lista.`, 'Medios: Transferencia, Canje Disponible, Tarjetas Rurales o Pr\u00e9stamos Bancarios (sin subsidio de tasa).'] }
+            ];
+            doc.setFontSize(9);
+            payOpts.forEach(opt => {
+                doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+                doc.text('\u2022 ' + opt.title, 18, y); y += 5;
+                opt.subs.forEach(sub => {
+                    doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60);
+                    const sl = doc.splitTextToSize('\u25e6 ' + sub, W-45);
+                    doc.text(sl, 24, y); y += sl.length * 4.5;
+                }); y += 2;
+            });
+
+            // Sección 3
+            y += 2; if (y > 230) { doc.addPage(); addWatermark(doc); y = 20; }
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...green);
+            doc.text('3. VALOR AGREGADO GRAIN-NK (Servicios Incluidos)', 15, y); doc.setTextColor(0,0,0); y += 6;
+            const svcs = [
+                { title: 'NK Powered By CROPWISE:', desc: 'Ambientaci\u00f3n y/o prescripci\u00f3n de siembra y fertilizaci\u00f3n variable ajustada a la curva de respuesta del h\u00edbrido NK seleccionado.' },
+                { title: 'SIEMBRA PROTEGIDA:', desc: 'Cobertura ante contingencias clim\u00e1ticas en la etapa cr\u00edtica del cultivo (requiere informar ubicaci\u00f3n del lote y fecha de siembra). Link de t\u00e9rminos y condiciones.' },
+                { title: 'LOG\u00cdSTICA BONIFICADA:', desc: 'Entrega directa en campo cuando podemos coordinar la entrega directa desde el semillero o la retiras de nuestro dep\u00f3sito de Sinsacate.' }
+            ];
+            doc.setFontSize(9);
+            svcs.forEach((s, i) => {
+                doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+                doc.text(`${i+1}.`, 15, y); doc.text(s.title, 20, y);
+                const tW = 20 + doc.getTextWidth(s.title + ' ');
+                doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60);
+                const dL = doc.splitTextToSize(s.desc, W - tW - 15);
+                if (dL.length === 1) { doc.text(dL[0], tW, y); y += 6; }
+                else { doc.text(dL[0], tW, y); y += 5; const r = doc.splitTextToSize(dL.slice(1).join(' '), W-34); doc.text(r, 19, y); y += r.length * 4.5 + 1; }
+            });
+
+            // Pie pág 1
+            const ph1 = doc.internal.pageSize.height;
+            doc.setFontSize(8); doc.setTextColor(130,130,130);
+            doc.text('Todos los precios son expresados en d\u00f3lares estadounidenses m\u00e1s IVA.', 15, ph1-18);
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(0,0,0);
+            doc.text(`${clientData.comercial || 'Alejandro Etchegorry'}.`, W-15, ph1-10, { align:'right' });
+
+            // ── PÁGINA 2 ──
+            doc.addPage(); addWatermark(doc);
+            doc.addImage(LOGO_BASE64, 'PNG', 15, 10, 35, 22);
+            y = 42;
+
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...green);
+            doc.text('Tipo de cambio:', 15, y);
+            doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+            const tcL = doc.splitTextToSize(' D\u00f3lar Divisa Vendedor BNA del cierre del d\u00eda anterior a la fecha efectiva del cobro.', W-30-doc.getTextWidth('Tipo de cambio:'));
+            doc.text(tcL, 15+doc.getTextWidth('Tipo de cambio:'), y); y += tcL.length * 5 + 3;
+            doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(80,80,80);
+            const tcD = doc.splitTextToSize('En caso de ocurrir una variaci\u00f3n del tipo de cambio aplicable superior al 5% entre el cierre del d\u00eda h\u00e1bil anterior a la efectiva realizaci\u00f3n del cobro, y el cierre del d\u00eda h\u00e1bil en el cu\u00e1l Syngenta recibi\u00f3 efectivamente el cobro, Syngenta considerar\u00e1 el tipo de cambio aplicable al cierre de \u00e9ste \u00faltimo d\u00eda h\u00e1bil.', W-30);
+            doc.text(tcD, 15, y); y += tcD.length * 4 + 10;
+
+            doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(0,0,0);
+            doc.text('Confirmaci\u00f3n:', 15, y);
+            doc.setFont('helvetica','normal');
+            const cfL = doc.splitTextToSize(' Para asegurar los calibres y la reserva de stock, se requiere la firma o confirmaci\u00f3n electr\u00f3nica de la orden de venta o el env\u00edo de la Orden de Compra correspondiente.', W-30-doc.getTextWidth('Confirmaci\u00f3n:'));
+            doc.text(cfL, 15+doc.getTextWidth('Confirmaci\u00f3n:'), y); y += cfL.length * 5 + 10;
+
+            doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(0,0,0);
+            doc.text('Estoy a disposici\u00f3n para responder cualquier consulta.', 15, y);
+            const ph2 = doc.internal.pageSize.height;
+            doc.setFont('helvetica','bold'); doc.setFontSize(11);
+            doc.text(`${clientData.comercial || 'Alejandro Etchegorry'}.`, W-15, ph2-15, { align:'right' });
+
+            doc.save(`Propuesta_Semillas_NK_${clientData.clientName || 'Cliente'}.pdf`);
+        };
+
+        // --- GENERADOR DE PDF: AGROINSUMOS ---
+        const generateInsumosPDF = (clientData, insumos) => {
+            const doc = new window.jspdf.jsPDF();
+            const primaryColor = [42, 120, 65], secondaryColor = [255, 255, 255];
+
+            // Watermark
+            const addWatermark = (d) => {
+                const pw = d.internal.pageSize.getWidth();
+                const ph = d.internal.pageSize.getHeight();
+                d.saveGraphicsState();
+                d.setGState(new window.jspdf.GState({ opacity: 0.1 }));
+                d.addImage(LOGO_BASE64, 'PNG', pw/2 - 40, ph/2 - 40, 80, 80);
+                d.restoreGraphicsState();
+            };
+            addWatermark(doc);
+
+            // Encabezado
+            doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+            doc.rect(0, 0, 210, 30, 'F');
+            
+            // Logo en encabezado
+            doc.addImage(LOGO_BASE64, 'PNG', 10, 5, 20, 20);
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16); doc.setFont("helvetica", "bold");
+            doc.text("COTIZACIÓN DE AGROINSUMOS", 110, 15, { align: "center" });
+            doc.setFontSize(12); doc.text("GRAIN - Genética y Agro Insumos del Norte SA", 110, 23, { align: "center" });
+
+            // Datos
+            doc.setTextColor(0, 0, 0); doc.setFontSize(10); doc.setFont("helvetica", "normal");
+            doc.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, 15, 40);
+            doc.text(`Vigencia: ${clientData.validUntil || 'Hasta agotar stock'}`, 15, 47);
+            doc.text(`Cliente: ${clientData.clientName || 'Sin especificar'}`, 15, 54);
+
+            // Tabla Insumos
+            const tableData = insumos.map(i => [i.cat, i.name, i.qty, `U$S ${parseFloat(i.price).toFixed(2)}`, `U$S ${(i.qty * i.price).toFixed(2)}`]);
+            const total = insumos.reduce((acc, i) => acc + (i.qty * i.price), 0);
+
+            doc.autoTable({
+                startY: 65,
+                head: [['Categoría', 'Producto', 'Cantidad', 'Precio Unit.', 'Subtotal']],
+                body: tableData,
+                headStyles: { fillColor: primaryColor, textColor: [255, 255, 255] },
+                theme: 'striped', styles: { fontSize: 9 }
+            });
+
+            const finalY = doc.lastAutoTable.finalY + 12;
+            doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+            doc.text(`TOTAL AGROINSUMOS: U$S ${total.toFixed(2)}`, 140, finalY);
+
+            // Comentarios
+            if (clientData.insumosComment) {
+                const commY = finalY + 15;
+                doc.setFont("helvetica", "bold"); doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+                doc.text("Notas Adicionales:", 15, commY);
+                doc.setFont("helvetica", "normal"); doc.setTextColor(0, 0, 0);
+                const splitComment = doc.splitTextToSize(clientData.insumosComment, 180);
+                doc.text(splitComment, 15, commY + 7);
+            }
+
+            // Pie
+            const ph = doc.internal.pageSize.height;
+            doc.setFontSize(8); doc.setTextColor(100, 100, 100);
+            doc.text("Los precios están expresados en USD sin IVA. Sujetos a disponibilidad de stock.", 15, ph - 20);
+            doc.save(`Cotizacion_Insumos_${clientData.clientName || 'Cliente'}.pdf`);
+        };
+
+        // --- COMPONENTE GENERADOR ---
+        function QuoteGenerator({ maizePrices, sunflowerPrices, stockData }) {
+            const [clientName, setClientName] = useState('');
+            const [validUntil, setValidUntil] = useState('');
+            const [distributor, setDistributor] = useState('Productor');
+            const [preCampaign, setPreCampaign] = useState(12);
+            const [empowerment, setEmpowerment] = useState(0);
+            const [paymentCondition, setPaymentCondition] = useState('CDO/Tarjeta/Préstamo/Canje Disponible');
+            const [rows, setRows] = useState([{ id: 1, type: 'MZ', hybrid: maizePrices[0].id, band: 'B1', quantity: 1, obs: '' }]);
+            
+            const [seedsComment, setSeedsComment] = useState('');
+            const [insumosComment, setInsumosComment] = useState('');
+
+            // --- AGROINSUMOS (datos vienen como prop desde App) ---
+            const [selectedInsumos, setSelectedInsumos] = useState([]);
+            const [insumoSearch, setInsumoSearch] = useState('');
+            const [insumoQty, setInsumoQty] = useState(1);
+            const [insumoSelected, setInsumoSelected] = useState('');
+
+            const stockCategories = useMemo(() => ['Todas', ...Array.from(new Set(stockData.map(i => i.cat))).sort()], [stockData]);
+            const [insumoCatFilter, setInsumoCatFilter] = useState('Todas');
+
+            const filteredStock = useMemo(() => stockData.filter(i => {
+                const matchCat = insumoCatFilter === 'Todas' || i.cat === insumoCatFilter;
+                const matchSearch = insumoSearch === '' || i.name.toLowerCase().includes(insumoSearch.toLowerCase());
+                return matchCat && matchSearch && i.price > 0;
+            }), [stockData, insumoCatFilter, insumoSearch]);
+
+            const addInsumo = () => {
+                const product = stockData.find(i => String(i.id) === String(insumoSelected));
+                if (!product) return;
+                const qty = parseFloat(insumoQty) || 1;
+                const exists = selectedInsumos.find(i => i.id === product.id);
+                if (exists) {
+                    setSelectedInsumos(selectedInsumos.map(i => i.id === product.id ? { ...i, qty: i.qty + qty } : i));
+                } else {
+                    setSelectedInsumos([...selectedInsumos, { ...product, qty }]);
+                }
+                setInsumoQty(1);
+            };
+
+            const removeInsumo = (id) => setSelectedInsumos(selectedInsumos.filter(i => i.id !== id));
+            const updateInsumoQty = (id, val) => setSelectedInsumos(selectedInsumos.map(i => i.id === id ? { ...i, qty: parseFloat(val) || 0 } : i));
+
+            const totalInsumos = selectedInsumos.reduce((acc, i) => acc + (i.qty * i.price || 0), 0);
+
+            const getBasePrice = (type, hybridId) => {
+                const arr = type === 'MZ' ? maizePrices : sunflowerPrices;
+                const found = arr.find(x => x.id === hybridId);
+                return found ? found.price : 0;
+            };
+
+            // Calcular precios con useMemo para evitar loops infinitos
+            const calculatedRows = useMemo(() => {
+                const dFactor = DISTRIBUTOR_FACTORS[distributor] || 1;
+                const pCond = PAYMENT_FACTORS[paymentCondition] || 1;
+                const preCamp = parseFloat(preCampaign) || 0;
+                const empower = parseFloat(empowerment) || 0;
+
+                return rows.map(row => {
+                    let base = getBasePrice(row.type, row.hybrid);
+                    let bandFactor = 1;
+                    if (row.type === 'MZ' && MAIZE_BANDS[row.band]) bandFactor = MAIZE_BANDS[row.band];
+                    if (row.type === 'GS' && SUNFLOWER_BANDS[row.band]) bandFactor = SUNFLOWER_BANDS[row.band];
+
+                    let precioBaseAjustado = base * bandFactor;
+                    let uPrice = precioBaseAjustado * (1 - preCamp / 100) * dFactor * (1 - empower / 100) * pCond;
+
+                    return {
+                        ...row,
+                        unitPrice: uPrice,
+                        totalPrice: uPrice * (parseFloat(row.quantity) || 0)
+                    };
+                });
+            }, [rows, distributor, preCampaign, empowerment, paymentCondition, maizePrices, sunflowerPrices]);
+
+            const addRow = () => {
+                setRows([...rows, {
+                    id: Date.now(),
+                    type: 'MZ',
+                    hybrid: maizePrices[0].id,
+                    band: 'B1',
+                    quantity: 1,
+                    obs: '',
+                    unitPrice: 0,
+                    totalPrice: 0
+                }]);
+            };
+
+            const removeRow = (id) => {
+                setRows(rows.filter(r => r.id !== id));
+            };
+
+            const handleRowChange = (id, field, value) => {
+                setRows(rows.map(r => {
+                    if (r.id !== id) return r;
+                    let newRow = { ...r, [field]: value };
+
+                    // Si cambia de tipo MZ a GS o viceversa, acomodar valores por defecto
+                    if (field === 'type') {
+                        if (value === 'MZ') {
+                            newRow.hybrid = maizePrices[0].id;
+                            newRow.band = 'B1';
+                        } else {
+                            newRow.hybrid = sunflowerPrices[0].id;
+                            newRow.band = 'G0-G2';
+                        }
+                    }
+                    return newRow;
+                }));
+            };
+
+            const totalGlobal = calculatedRows.reduce((acc, row) => acc + row.totalPrice, 0);
+
+            const s = {
+                container: { padding: '20px', maxWidth: '1200px', margin: '0 auto' },
+                card: { backgroundColor: 'white', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '20px' },
+                grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px' },
+                label: { display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#666', marginBottom: '5px' },
+                input: { width: '100%', padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' },
+                btnPrimary: { backgroundColor: '#0f4d22', color: 'white', border: 'none', padding: '12px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' },
+                btnDanger: { backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' },
+                tableRow: { display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }
+            };
+
+            return (
+                <div style={s.container}>
+                    <div style={s.card}>
+                        <h2 style={{ marginTop: 0, color: '#0f4d22' }}>Datos del Cliente y Condiciones</h2>
+                        <div style={s.grid}>
+                            <div>
+                                <label style={s.label}>Cliente</label>
+                                <input style={s.input} placeholder="Juan Pérez" value={clientName} onChange={e => setClientName(e.target.value)} />
+                            </div>
+                            <div>
+                                <label style={s.label}>Tipo Distribuidor</label>
+                                <select style={s.input} value={distributor} onChange={e => setDistributor(e.target.value)}>
+                                    {Object.keys(DISTRIBUTOR_FACTORS).map(k => <option key={k} value={k}>{k}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style={s.label}>% Precampaña</label>
+                                <input type="number" style={s.input} value={preCampaign} onChange={e => setPreCampaign(e.target.value)} />
+                            </div>
+                            <div>
+                                <label style={s.label}>% Empowerment</label>
+                                <input type="number" style={s.input} value={empowerment} onChange={e => setEmpowerment(e.target.value)} />
+                            </div>
+                            <div>
+                                <label style={s.label}>Condición de Pago</label>
+                                <select style={s.input} value={paymentCondition} onChange={e => setPaymentCondition(e.target.value)}>
+                                    {Object.keys(PAYMENT_FACTORS).map(k => <option key={k} value={k}>{k}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style={s.label}>Vigencia</label>
+                                <input style={s.input} placeholder="Ej: 30 de Abril 2026" value={validUntil} onChange={e => setValidUntil(e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={s.card}>
+                        <h2 style={{ marginTop: 0, color: '#0f4d22' }}>Productos</h2>
+                        {calculatedRows.map((row, idx) => (
+                            <div key={row.id} style={{ ...s.tableRow, paddingBottom: '10px', borderBottom: idx < rows.length - 1 ? '1px solid #eee' : 'none' }}>
+                                <div style={{ width: '80px' }}>
+                                    <label style={s.label}>Tipo</label>
+                                    <select style={s.input} value={row.type} onChange={e => handleRowChange(row.id, 'type', e.target.value)}>
+                                        <option value="MZ">Maíz</option>
+                                        <option value="GS">Girasol</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1, minWidth: '150px' }}>
+                                    <label style={s.label}>Híbrido</label>
+                                    <select style={s.input} value={row.hybrid} onChange={e => handleRowChange(row.id, 'hybrid', e.target.value)}>
+                                        {(row.type === 'MZ' ? maizePrices : sunflowerPrices).map(p => (
+                                            <option key={p.id} value={p.id}>{p.id}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div style={{ width: '100px' }}>
+                                    <label style={s.label}>Banda</label>
+                                    <select style={s.input} value={row.band} onChange={e => handleRowChange(row.id, 'band', e.target.value)}>
+                                        {Object.keys(row.type === 'MZ' ? MAIZE_BANDS : SUNFLOWER_BANDS).map(b => (
+                                            <option key={b} value={b}>{b}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div style={{ width: '80px' }}>
+                                    <label style={s.label}>Bolsas</label>
+                                    <input type="number" style={s.input} value={row.quantity} onChange={e => handleRowChange(row.id, 'quantity', e.target.value)} />
+                                </div>
+                                <div style={{ width: '100px' }}>
+                                    <label style={s.label}>U/Price</label>
+                                    <div style={{ padding: '10px', fontWeight: 'bold', fontSize: '14px' }}>${row.unitPrice.toFixed(2)}</div>
+                                </div>
+                                <div style={{ width: '100px' }}>
+                                    <label style={s.label}>Total</label>
+                                    <div style={{ padding: '10px', fontWeight: 'bold', fontSize: '14px', color: '#0f4d22' }}>${row.totalPrice.toFixed(2)}</div>
+                                </div>
+                                <div style={{ flex: 1, minWidth: '150px' }}>
+                                    <label style={s.label}>Observaciones</label>
+                                    <input style={s.input} placeholder="Ej: Contado" value={row.obs} onChange={e => handleRowChange(row.id, 'obs', e.target.value)} />
+                                </div>
+                                <button style={{ ...s.btnDanger, alignSelf: 'flex-end', marginBottom: '2px' }} onClick={() => removeRow(row.id)}>X</button>
+                            </div>
+                        ))}
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button onClick={addRow} style={{ ...s.btnPrimary, backgroundColor: '#d4af37', color: '#000' }}>+ Agregar Híbrido</button>
+                            <button 
+                                onClick={() => generateSeedsPDF({ clientName, validUntil, preCampaign, empowerment, paymentCondition, seedsComment }, calculatedRows, totalGlobal)} 
+                                style={{ ...s.btnPrimary, backgroundColor: '#0f4d22' }}
+                            >
+                                📄 Generar PDF Semillas
+                            </button>
+                        </div>
+                        <div style={{ marginTop: '15px' }}>
+                            <label style={s.label}>Comentarios Semillas</label>
+                            <textarea 
+                                style={{ ...s.input, minHeight: '60px', resize: 'vertical' }} 
+                                placeholder="Notas adicionales para la propuesta de semillas..."
+                                value={seedsComment}
+                                onChange={e => setSeedsComment(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {/* --- SECCIÓN AGROINSUMOS --- */}
+                    <div style={s.card}>
+                        <h2 style={{ marginTop: 0, color: '#0f4d22' }}>🌿 Agroinsumos</h2>
+
+                        {/* Filtros de búsqueda */}
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px', alignItems: 'flex-end' }}>
+                            <div style={{ flex: '1', minWidth: '160px' }}>
+                                <label style={s.label}>Categoría</label>
+                                <select style={s.input} value={insumoCatFilter} onChange={e => setInsumoCatFilter(e.target.value)}>
+                                    {stockCategories.map(c => <option key={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ flex: '2', minWidth: '180px' }}>
+                                <label style={s.label}>Buscar producto</label>
+                                <input style={s.input} placeholder="Ej: Glifosato, Atrazina..." value={insumoSearch} onChange={e => setInsumoSearch(e.target.value)} />
+                            </div>
+                            <div style={{ flex: '2', minWidth: '200px' }}>
+                                <label style={s.label}>Seleccionar ({filteredStock.length} disponibles)</label>
+                                <select style={s.input} value={insumoSelected} onChange={e => setInsumoSelected(e.target.value)}>
+                                    <option value="">-- Elegir producto --</option>
+                                    {filteredStock.map(p => <option key={p.id} value={p.id}>{p.cat} | {p.name} — U$S {p.price.toFixed(2)}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ width: '80px' }}>
+                                <label style={s.label}>Cantidad</label>
+                                <input type="number" min="1" style={s.input} value={insumoQty} onChange={e => setInsumoQty(e.target.value)} />
+                            </div>
+                            <button onClick={addInsumo} disabled={!insumoSelected} style={{ ...s.btnPrimary, backgroundColor: '#2a7841', marginTop: '0', alignSelf: 'flex-end', opacity: insumoSelected ? 1 : 0.4 }}>+ Agregar</button>
+                        </div>
+
+                        {/* Tabla de insumos seleccionados */}
+                        {selectedInsumos.length > 0 ? (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                                <thead>
+                                    <tr style={{ background: '#2a7841', color: 'white' }}>
+                                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Categoría</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Producto</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Dosis/Notas</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'center', width: '80px' }}>Cantidad</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Precio Unit.</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Subtotal</th>
+                                        <th style={{ padding: '8px 10px', textAlign: 'center' }}></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {selectedInsumos.map((item, idx) => (
+                                        <tr key={item.id} style={{ background: idx % 2 === 0 ? '#f6fbf7' : 'white', borderBottom: '1px solid #e0ede4' }}>
+                                            <td style={{ padding: '7px 10px' }}><span style={{ background: '#e4f3e9', color: '#2a7841', padding: '2px 7px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold' }}>{item.cat}</span></td>
+                                            <td style={{ padding: '7px 10px', fontWeight: '500' }}>{item.name}</td>
+                                            <td style={{ padding: '7px 10px', color: '#666', fontSize: '12px' }}>{item.notes}</td>
+                                            <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                                                <input type="number" min="0" value={item.qty} onChange={e => updateInsumoQty(item.id, e.target.value)} style={{ width: '65px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', textAlign: 'center' }} />
+                                            </td>
+                                            <td style={{ padding: '7px 10px', textAlign: 'right' }}>U$S {item.price.toFixed(2)}</td>
+                                            <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 'bold', color: '#2a7841' }}>U$S {(item.qty * item.price).toFixed(2)}</td>
+                                            <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                                                <button onClick={() => removeInsumo(item.id)} style={{ background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', fontSize: '12px' }}>✕</button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div style={{ padding: '20px', textAlign: 'center', color: '#aaa', background: '#fafafa', borderRadius: '6px', border: '1px dashed #ddd' }}>Buscá y agregá productos para incluir en la propuesta</div>
+                        )}
+
+                        {selectedInsumos.length > 0 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
+                                <button 
+                                    onClick={() => generateInsumosPDF({ clientName, validUntil, insumosComment }, selectedInsumos)} 
+                                    style={{ ...s.btnPrimary, backgroundColor: '#2a7841', marginTop: 0 }}
+                                >
+                                    📄 Generar PDF Insumos
+                                </button>
+                                <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#2a7841' }}>
+                                    Subtotal Agroinsumos: U$S {totalInsumos.toFixed(2)}
+                                </div>
+                            </div>
+                        )}
+                        <div style={{ marginTop: '15px' }}>
+                            <label style={s.label}>Comentarios Agroinsumos</label>
+                            <textarea 
+                                style={{ ...s.input, minHeight: '60px', resize: 'vertical' }} 
+                                placeholder="Notas adicionales para la cotización de agroinsumos..."
+                                value={insumosComment}
+                                onChange={e => setInsumosComment(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {/* TOTAL GLOBAL */}
+                    <div style={{ ...s.card, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'linear-gradient(135deg, #0f4d22, #1a6b30)', padding: '20px' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#a0c8a8', fontSize: '13px', marginBottom: '4px' }}>Inversión Total Estimada (Semillas + Insumos)</div>
+                            <div style={{ color: 'white', fontSize: '26px', fontWeight: 'bold' }}>U$S {(totalGlobal + totalInsumos).toFixed(2)}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- COMPONENTE ADMINISTRADOR ---
+        function PriceAdmin({ maizePrices, sunflowerPrices, onSave }) {
+            const [mz, setMz] = useState(maizePrices);
+            const [gs, setGs] = useState(sunflowerPrices);
+
+            const handleMzChange = (id, newPrice) => {
+                setMz(mz.map(p => p.id === id ? { ...p, price: parseFloat(newPrice) || 0 } : p));
+            };
+
+            const handleGsChange = (id, newPrice) => {
+                setGs(gs.map(p => p.id === id ? { ...p, price: parseFloat(newPrice) || 0 } : p));
+            };
+
+            const s = {
+                container: { padding: '20px', maxWidth: '1000px', margin: '0 auto' },
+                card: { backgroundColor: 'white', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '20px' },
+                table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
+                th: { backgroundColor: '#0f4d22', color: 'white', padding: '10px', textAlign: 'left' },
+                td: { padding: '10px', borderBottom: '1px solid #ccc' },
+                input: { width: '100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' },
+                btnPrimary: { backgroundColor: '#0f4d22', color: 'white', border: 'none', padding: '12px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', display: 'block', margin: '20px auto' }
+            };
+
+            return (
+                <div style={s.container}>
+                    <div style={s.card}>
+                        <h2 style={{ marginTop: 0, color: '#0f4d22' }}>Híbridos de Maíz (Base: Banda 1)</h2>
+                        <table style={s.table}>
+                            <thead>
+                                <tr>
+                                    <th style={s.th}>Híbrido</th>
+                                    <th style={s.th}>Precio Base (U$S)</th>
+                                    <th style={s.th}>B2 (-3%)</th>
+                                    <th style={s.th}>B3 (-12%)</th>
+                                    <th style={s.th}>B4 (-15%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {mz.map(p => (
+                                    <tr key={p.id}>
+                                        <td style={s.td}><strong>{p.id}</strong></td>
+                                        <td style={s.td}>
+                                            <input type="number" style={s.input} value={p.price} onChange={e => handleMzChange(p.id, e.target.value)} />
+                                        </td>
+                                        <td style={s.td}>{(p.price * 0.97).toFixed(2)}</td>
+                                        <td style={s.td}>{(p.price * 0.88).toFixed(2)}</td>
+                                        <td style={s.td}>{(p.price * 0.85).toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style={s.card}>
+                        <h2 style={{ marginTop: 0, color: '#d4af37' }}>Híbridos de Girasol (Base: G0-G2)</h2>
+                        <table style={s.table}>
+                            <thead>
+                                <tr>
+                                    <th style={{ ...s.th, backgroundColor: '#d4af37', color: '#000' }}>Híbrido</th>
+                                    <th style={{ ...s.th, backgroundColor: '#d4af37', color: '#000' }}>Precio Base (U$S)</th>
+                                    <th style={{ ...s.th, backgroundColor: '#d4af37', color: '#000' }}>G3 (-3%)</th>
+                                    <th style={{ ...s.th, backgroundColor: '#d4af37', color: '#000' }}>G4 (-20%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {gs.map(p => (
+                                    <tr key={p.id}>
+                                        <td style={s.td}><strong>{p.id}</strong></td>
+                                        <td style={s.td}>
+                                            <input type="number" style={s.input} value={p.price} onChange={e => handleGsChange(p.id, e.target.value)} />
+                                        </td>
+                                        <td style={s.td}>{(p.price * 0.97).toFixed(2)}</td>
+                                        <td style={s.td}>{(p.price * 0.80).toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <button style={s.btnPrimary} onClick={() => onSave(mz, gs)}>💾 Guardar Precios</button>
+                </div>
+            );
+        }
+
+        // --- COMPONENTE STOCK MANAGER ---
+        function StockManager({ stockData, setStockData }) {
+            const [items, setItems] = useState(stockData || INITIAL_STOCK);
+            const [search, setSearch] = useState('');
+            const [filterCat, setFilterCat] = useState('Todas');
+            const [filterExpiry, setFilterExpiry] = useState('Todos');
+            const [editingId, setEditingId] = useState(null);
+            const [editBuf, setEditBuf] = useState({});
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [newItem, setNewItem] = useState({cat:'Herbicida',name:'',price:'',expiry:'',notes:'',qty:0});
+
+            const categories = useMemo(() => ['Todas', ...Array.from(new Set(items.map(i => i.cat))).sort()], [items]);
+
+            const save = (updated) => {
+                setItems(updated);
+                localStorage.setItem('grain_stock', JSON.stringify(updated));
+                if (setStockData) setStockData(updated);
+            };
+
+            const filtered = useMemo(() => items.filter(i => {
+                const matchCat = filterCat === 'Todas' || i.cat === filterCat;
+                const matchSearch = i.name.toLowerCase().includes(search.toLowerCase()) || i.cat.toLowerCase().includes(search.toLowerCase());
+                const matchExp = filterExpiry === 'Todos' ||
+                    (filterExpiry === 'Vencidos' && getExpiryStatus(i.expiry) === 'expired') ||
+                    (filterExpiry === 'Por vencer' && getExpiryStatus(i.expiry) === 'soon') ||
+                    (filterExpiry === 'Vigentes' && getExpiryStatus(i.expiry) === 'ok') ||
+                    (filterExpiry === 'Sin fecha' && !i.expiry);
+                return matchCat && matchSearch && matchExp;
+            }), [items, filterCat, search, filterExpiry]);
+
+            const startEdit = (item) => { setEditingId(item.id); setEditBuf({price: item.price, expiry: item.expiry, notes: item.notes, qty: item.qty}); };
+            const cancelEdit = () => setEditingId(null);
+            const confirmEdit = (id) => {
+                const updated = items.map(i => i.id === id ? {...i, price: parseFloat(editBuf.price)||0, expiry: editBuf.expiry, notes: editBuf.notes, qty: parseFloat(editBuf.qty)||0} : i);
+                save(updated); setEditingId(null);
+            };
+            const deleteItem = (id) => { if(confirm('¿Eliminar producto?')) save(items.filter(i => i.id !== id)); };
+            const addItem = () => {
+                if(!newItem.name.trim()) return alert('Ingresá un nombre');
+                const added = [...items, {...newItem, id: Date.now(), price: parseFloat(newItem.price)||0, qty: parseFloat(newItem.qty)||0}];
+                save(added); setNewItem({cat:'Herbicida',name:'',price:'',expiry:'',notes:'',qty:0}); setShowAddForm(false);
+            };
+            const resetStock = () => {
+                if(confirm('¿Restaurar stock inicial? Se perderán todos los cambios.')) save(INITIAL_STOCK);
+            };
+
+            const statusColor = { expired:'#dc3545', soon:'#fd7e14', ok:'#198754', none:'#6c757d' };
+            const statusLabel = { expired:'VENCIDO', soon:'Por vencer', ok:'Vigente', none:'Sin fecha' };
+
+            const inp = { padding:'6px 8px', border:'1px solid #ccc', borderRadius:'4px', fontSize:'13px', width:'100%' };
+            const counts = { expired: items.filter(i=>getExpiryStatus(i.expiry)==='expired').length, soon: items.filter(i=>getExpiryStatus(i.expiry)==='soon').length };
+
+            return (
+                <div style={{padding:'20px', maxWidth:'1400px', margin:'0 auto'}}>
+                    {/* Resumen */}
+                    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:'12px', marginBottom:'20px'}}>
+                        {[
+                            {label:'Total Productos', val: items.length, color:'#0f4d22'},
+                            {label:'Vencidos', val: counts.expired, color:'#dc3545'},
+                            {label:'Por vencer (90d)', val: counts.soon, color:'#fd7e14'},
+                            {label:'Categorías', val: categories.length - 1, color:'#0d6efd'}
+                        ].map(c => (
+                            <div key={c.label} style={{background:'white', borderRadius:'8px', padding:'16px', boxShadow:'0 2px 6px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c.color}`}}>
+                                <div style={{fontSize:'28px', fontWeight:'bold', color:c.color}}>{c.val}</div>
+                                <div style={{fontSize:'12px', color:'#666', marginTop:'4px'}}>{c.label}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Filtros */}
+                    <div style={{background:'white', borderRadius:'8px', padding:'16px', boxShadow:'0 2px 6px rgba(0,0,0,0.08)', marginBottom:'20px', display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'center'}}>
+                        <input style={{...inp, flex:'2', minWidth:'180px'}} placeholder="🔍 Buscar producto..." value={search} onChange={e=>setSearch(e.target.value)} />
+                        <select style={{...inp, flex:'1', minWidth:'160px'}} value={filterCat} onChange={e=>setFilterCat(e.target.value)}>
+                            {categories.map(c=><option key={c}>{c}</option>)}
+                        </select>
+                        <select style={{...inp, flex:'1', minWidth:'140px'}} value={filterExpiry} onChange={e=>setFilterExpiry(e.target.value)}>
+                            {['Todos','Vigentes','Por vencer','Vencidos','Sin fecha'].map(o=><option key={o}>{o}</option>)}
+                        </select>
+                        <button onClick={()=>setShowAddForm(!showAddForm)} style={{padding:'8px 16px', background:'#0f4d22', color:'white', border:'none', borderRadius:'4px', cursor:'pointer', fontWeight:'bold', whiteSpace:'nowrap'}}>+ Agregar</button>
+                        <button onClick={resetStock} style={{padding:'8px 12px', background:'#6c757d', color:'white', border:'none', borderRadius:'4px', cursor:'pointer', fontSize:'12px'}}>↩ Restaurar</button>
+                    </div>
+
+                    {/* Formulario nuevo producto */}
+                    {showAddForm && (
+                        <div style={{background:'white', borderRadius:'8px', padding:'20px', boxShadow:'0 2px 6px rgba(0,0,0,0.1)', marginBottom:'20px', borderLeft:'4px solid #0f4d22'}}>
+                            <h3 style={{margin:'0 0 15px', color:'#0f4d22'}}>Nuevo Producto</h3>
+                            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:'12px'}}>
+                                <div><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>CATEGORÍA</label>
+                                    <select style={inp} value={newItem.cat} onChange={e=>setNewItem({...newItem,cat:e.target.value})}>
+                                        {categories.filter(c=>c!=='Todas').map(c=><option key={c}>{c}</option>)}
+                                        <option value="Otra">Otra</option>
+                                    </select></div>
+                                <div style={{gridColumn:'span 2'}}><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>NOMBRE</label>
+                                    <input style={inp} value={newItem.name} onChange={e=>setNewItem({...newItem,name:e.target.value})} placeholder="Nombre del producto" /></div>
+                                <div><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>PRECIO (U$S)</label>
+                                    <input type="number" style={inp} value={newItem.price} onChange={e=>setNewItem({...newItem,price:e.target.value})} /></div>
+                                <div><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>VENCIMIENTO</label>
+                                    <input type="date" style={inp} value={newItem.expiry} onChange={e=>setNewItem({...newItem,expiry:e.target.value})} /></div>
+                                <div><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>CANTIDAD</label>
+                                    <input type="number" style={inp} value={newItem.qty} onChange={e=>setNewItem({...newItem,qty:e.target.value})} /></div>
+                                <div style={{gridColumn:'span 2'}}><label style={{fontSize:'11px', color:'#666', fontWeight:'bold', display:'block', marginBottom:'4px'}}>NOTAS</label>
+                                    <input style={inp} value={newItem.notes} onChange={e=>setNewItem({...newItem,notes:e.target.value})} placeholder="Dosis, observaciones..." /></div>
+                            </div>
+                            <div style={{marginTop:'15px', display:'flex', gap:'10px'}}>
+                                <button onClick={addItem} style={{padding:'8px 20px', background:'#0f4d22', color:'white', border:'none', borderRadius:'4px', cursor:'pointer', fontWeight:'bold'}}>Guardar</button>
+                                <button onClick={()=>setShowAddForm(false)} style={{padding:'8px 20px', background:'#6c757d', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>Cancelar</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tabla */}
+                    <div style={{background:'white', borderRadius:'8px', boxShadow:'0 2px 6px rgba(0,0,0,0.08)', overflow:'auto'}}>
+                        <div style={{padding:'12px 16px', borderBottom:'1px solid #eee', fontSize:'13px', color:'#666'}}>Mostrando {filtered.length} de {items.length} productos</div>
+                        <table style={{width:'100%', borderCollapse:'collapse', fontSize:'13px'}}>
+                            <thead>
+                                <tr style={{background:'#0f4d22', color:'white'}}>
+                                    <th style={{padding:'10px 12px', textAlign:'left'}}>Categoría</th>
+                                    <th style={{padding:'10px 12px', textAlign:'left'}}>Producto</th>
+                                    <th style={{padding:'10px 12px', textAlign:'right'}}>Precio U$S</th>
+                                    <th style={{padding:'10px 12px', textAlign:'center'}}>Vencimiento</th>
+                                    <th style={{padding:'10px 12px', textAlign:'center'}}>Stock</th>
+                                    <th style={{padding:'10px 12px', textAlign:'left', minWidth:'180px'}}>Notas</th>
+                                    <th style={{padding:'10px 12px', textAlign:'center'}}>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((item, idx) => {
+                                    const st = getExpiryStatus(item.expiry);
+                                    const isEditing = editingId === item.id;
+                                    return (
+                                        <tr key={item.id} style={{background: idx%2===0?'#fafafa':'white', borderBottom:'1px solid #eee'}}>
+                                            <td style={{padding:'8px 12px'}}>
+                                                <span style={{background:'#e8f4ec', color:'#0f4d22', padding:'2px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold', whiteSpace:'nowrap'}}>{item.cat}</span>
+                                            </td>
+                                            <td style={{padding:'8px 12px', fontWeight:'500'}}>{item.name}</td>
+                                            <td style={{padding:'8px 12px', textAlign:'right'}}>
+                                                {isEditing
+                                                    ? <input type="number" style={{...inp, width:'80px'}} value={editBuf.price} onChange={e=>setEditBuf({...editBuf,price:e.target.value})} />
+                                                    : item.price > 0 ? <strong>U$S {item.price.toFixed(2)}</strong> : <span style={{color:'#aaa'}}>—</span>
+                                                }
+                                            </td>
+                                            <td style={{padding:'8px 12px', textAlign:'center'}}>
+                                                {isEditing
+                                                    ? <input type="date" style={{...inp, width:'140px'}} value={editBuf.expiry} onChange={e=>setEditBuf({...editBuf,expiry:e.target.value})} />
+                                                    : <span style={{background: statusColor[st]+'22', color: statusColor[st], padding:'2px 8px', borderRadius:'12px', fontSize:'11px', fontWeight:'bold', whiteSpace:'nowrap'}}>
+                                                        {item.expiry ? item.expiry.split('-').reverse().join('/') : '—'} {statusLabel[st] !== 'Vigente' ? '· '+statusLabel[st] : ''}
+                                                      </span>
+                                                }
+                                            </td>
+                                            <td style={{padding:'8px 12px', textAlign:'center'}}>
+                                                {isEditing
+                                                    ? <input type="number" style={{...inp, width:'70px'}} value={editBuf.qty} onChange={e=>setEditBuf({...editBuf,qty:e.target.value})} />
+                                                    : <span style={{fontWeight:'bold', color: item.qty===0?'#aaa':'#0f4d22'}}>{item.qty}</span>
+                                                }
+                                            </td>
+                                            <td style={{padding:'8px 12px', color:'#555'}}>
+                                                {isEditing
+                                                    ? <input style={{...inp}} value={editBuf.notes} onChange={e=>setEditBuf({...editBuf,notes:e.target.value})} />
+                                                    : item.notes
+                                                }
+                                            </td>
+                                            <td style={{padding:'8px 12px', textAlign:'center', whiteSpace:'nowrap'}}>
+                                                {isEditing ? (
+                                                    <>
+                                                        <button onClick={()=>confirmEdit(item.id)} style={{padding:'4px 10px', background:'#198754', color:'white', border:'none', borderRadius:'4px', cursor:'pointer', marginRight:'4px'}}>✓</button>
+                                                        <button onClick={cancelEdit} style={{padding:'4px 10px', background:'#6c757d', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>✕</button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <button onClick={()=>startEdit(item)} style={{padding:'4px 10px', background:'#0d6efd', color:'white', border:'none', borderRadius:'4px', cursor:'pointer', marginRight:'4px'}}>✎</button>
+                                                        <button onClick={()=>deleteItem(item.id)} style={{padding:'4px 10px', background:'#dc3545', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>🗑</button>
+                                                    </>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {filtered.length === 0 && (
+                                    <tr><td colSpan="7" style={{padding:'40px', textAlign:'center', color:'#aaa'}}>No se encontraron productos</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
