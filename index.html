@@ -37,8 +37,11 @@
     <script type="text/babel">
 
         // --- GOOGLE SHEETS CONFIG ---
+        // ID del documento de Google Sheets publicado como CSV
         const SHEETS_ID = '2PACX-1vRhbMuXXa9YEBWolz2tKragjideL-BH2alvA697LD6OiBDolcRlONXMnvSZdE8D7WGPgcZHrujo9Du4';
-        const SHEETS_BASE = `https://docs.google.com/spreadsheets/d/e/${SHEETS_ID}/pub?output=csv&sheet=`;
+        const SHEETS_BASE = `https://docs.google.com/spreadsheets/d/e/${SHEETS_ID}/pub?output=csv&gid=`;
+        // GIDs de cada hoja (necesarios porque "sheet=" no funciona para descargas CSV directas)
+        const SHEET_GIDS = { Maiz: '0', Girasol: '1241154618', Stock: '1439883325' };
 
         // Parser de CSV robusto (maneja campos con comas entre comillas)
         const parseCSV = (text) => {
@@ -55,7 +58,7 @@
                 vals.push(cur.trim());
                 return vals;
             };
-            const headers = parseRow(lines[0]);
+            const headers = parseRow(lines[0]).map(h => h.toLowerCase().trim());
             return lines.slice(1).map(line => {
                 const vals = parseRow(line);
                 const obj = {};
@@ -64,33 +67,8 @@
             }).filter(row => Object.values(row).some(v => v !== ''));
         };
 
-        // --- CONSTANTES Y LÓGICA DE NEGOCIO ---
-        // Estas constantes sirven como estructura inicial / fallback si Sheets no está disponible
-        const INITIAL_MZ = [
-            { id: 'NK 800TGCL', price: 155 },
-            { id: 'NK 825VIP3 CL', price: 205 },
-            { id: 'NK 842VIP3', price: 215 },
-            { id: 'NK 855VIP3', price: 190 },
-            { id: 'NK 870VIP3', price: 210 },
-            { id: 'NK 835VIP3', price: 210 },
-            { id: 'SYN126 TGPLUS', price: 100 },
-            { id: 'SYN126 VIP3', price: 175 },
-            { id: 'SX 7331 TGPLUS', price: 140 },
-            { id: 'SYN 505 VIP3', price: 170 },
-            { id: 'SYN 840 VIP3/4', price: 170 },
-            { id: 'SYN 840 TG PLUS', price: 120 }
-        ];
-
-        const INITIAL_GS = [
-            { id: 'SYN 4066', price: 290 },
-            { id: 'SY3939 CL', price: 345 },
-            { id: 'SYN3970 CL', price: 380 },
-            { id: 'NK 3949 CL', price: 380 },
-            { id: 'SYN 4070 CL', price: 290 },
-            { id: 'NK 3979 CLHO', price: 410 },
-            { id: 'NK 3969 CL', price: 385 }
-        ];
-
+        // --- LÓGICA DE NEGOCIO ---
+        // Estas constantes se usan para el cálculo de descuentos y condiciones
         const MAIZE_BANDS = { 'B1': 1.00, 'B2': 0.97, 'B3': 0.88, 'B4': 0.85 };
         const SUNFLOWER_BANDS = { 'G0-G2': 1.00, 'G3': 0.97, 'G4': 0.80 };
 
@@ -109,193 +87,7 @@
             'Canje Corto ENE 2027 AVC (gir)': 0.97,
             'CDO/Tarjeta/Préstamo/Canje Disponible': 0.92,
             'SGR': 0.92
-
         };
-
-        // --- STOCK INICIAL ---
-        const INITIAL_STOCK = [
-          {id:1,cat:'Bio Estimulante',name:'Biosalmon',price:6.50,expiry:'2025-03-20',notes:'3 L/Ha',qty:0},
-          {id:2,cat:'Bio Insecticida',name:'Mulsanne (Isaria fumosorosea) x5l',price:33.00,expiry:'2026-01-16',notes:'500 cc/ha',qty:0},
-          {id:3,cat:'Bioestimulante/fertilizante',name:'Bioforge Advanced',price:35.00,expiry:'2025-09-27',notes:'dosis 0,5 l/ha',qty:0},
-          {id:4,cat:'Bioestimulante/fertilizante',name:'Nitrobac (Gluconacetobacter)',price:37.80,expiry:'2025-10-20',notes:'dosis 400 cc/ha en Mz',qty:0},
-          {id:5,cat:'Bioestimulante/fertilizante',name:'Nitroplus 18 x 20 L',price:3.68,expiry:'2024-12-30',notes:'Mz:10 l/ha',qty:0},
-          {id:6,cat:'Bioestimulante/fertilizante',name:'Nutrimins Semilla',price:9.00,expiry:'2025-04-29',notes:'para vender solo',qty:0},
-          {id:7,cat:'Bioestimulante/fertilizante',name:'Nutrition Grow',price:22.20,expiry:'2026-02-26',notes:'500 cc/ha en soja y maíz',qty:0},
-          {id:8,cat:'Bioestimulante/fertilizante',name:'Pack 360 Trigo Nutrimins Semilla',price:7.50,expiry:'2025-04-29',notes:'500 cc c/100 kilos - Pack con Stimulate (2:1)',qty:0},
-          {id:9,cat:'Bioestimulante/fertilizante',name:'Pack 360 Trigo Stimulate',price:50.00,expiry:'2025-04-29',notes:'265 cc/ha - Pack con Nutrimins (1:2)',qty:0},
-          {id:10,cat:'Bioestimulante/fertilizante',name:'Phytogard Zinc x 20L',price:0,expiry:'',notes:'1 l/ha',qty:0},
-          {id:11,cat:'Bioestimulante/fertilizante',name:'Sett x 20 Lts',price:8.05,expiry:'2025-09-19',notes:'2 l/ha',qty:0},
-          {id:12,cat:'Bioestimulante/fertilizante',name:'SOGIX',price:14.95,expiry:'2026-01-05',notes:'300 cc/ha',qty:0},
-          {id:13,cat:'Bioestimulante/fertilizante',name:'Start Fert x 10 Litros',price:5.18,expiry:'2026-01-16',notes:'Dosis: 2 litros x ha',qty:0},
-          {id:14,cat:'Bioestimulante/fertilizante',name:'Stimulate trihormonal x 20L',price:57.50,expiry:'2025-04-29',notes:'250 cc/ha - Venta Solo',qty:0},
-          {id:15,cat:'Bioestimulante/fertilizante',name:'Stingray x1L',price:21.84,expiry:'2025-10-20',notes:'dosis 500 cc/ha',qty:0},
-          {id:16,cat:'Bioestimulante/fertilizante',name:'Zetrix',price:14.50,expiry:'2026-01-12',notes:'dosis 300 cc/ha',qty:0},
-          {id:17,cat:'Coadyuvante',name:'Antideriva Nova',price:43.68,expiry:'2025-08-07',notes:'30 cc C/100 de Agua',qty:0},
-          {id:18,cat:'Coadyuvante',name:'Antiespuma Nova - CHANCE',price:70.56,expiry:'2025-08-07',notes:'',qty:0},
-          {id:19,cat:'Coadyuvante',name:'Bolt',price:3.60,expiry:'2025-11-03',notes:'',qty:0},
-          {id:20,cat:'Coadyuvante',name:'BREAK-THRU',price:45.89,expiry:'2025-01-16',notes:'25-50 c/100L',qty:0},
-          {id:21,cat:'Coadyuvante',name:'BREAK-THRU + MSO MAX x10L',price:13.20,expiry:'2025-08-07',notes:'200-250 cc/ha',qty:0},
-          {id:22,cat:'Coadyuvante',name:'Centauro (Sulfato de Amonio)',price:2.99,expiry:'2025-12-24',notes:'300 a 400gr/ha',qty:0},
-          {id:23,cat:'Coadyuvante',name:'Coadyuvante Exito',price:17.92,expiry:'2025-10-24',notes:'Exito versión vieja - descuento 10%',qty:0},
-          {id:24,cat:'Coadyuvante',name:'CORRECTOR H NOVA',price:14.56,expiry:'2025-08-07',notes:'',qty:0},
-          {id:25,cat:'Coadyuvante',name:'Lemur',price:7.75,expiry:'2025-08-07',notes:'',qty:0},
-          {id:26,cat:'Coadyuvante',name:'Samplex (Sulfato de Amonio líquido) x 15 kilos',price:1.44,expiry:'2026-01-28',notes:'Precio por kilo - Dosis: 0,5% v/v',qty:0},
-          {id:27,cat:'Coadyuvante',name:'Superlimpiador Nova',price:19.20,expiry:'2025-08-07',notes:'',qty:0},
-          {id:28,cat:'Coadyuvante',name:'TROP L limpiador',price:44.27,expiry:'2026-01-19',notes:'',qty:0},
-          {id:29,cat:'Coadyuvante',name:'TROP-CS',price:29.75,expiry:'2025-08-26',notes:'20-50 c/100L',qty:0},
-          {id:30,cat:'Coadyuvante',name:'TropGreen',price:26.88,expiry:'2026-01-16',notes:'Dosis: 100 cc/ha',qty:0},
-          {id:31,cat:'Coadyuvante',name:'Versión',price:2.54,expiry:'2025-10-24',notes:'',qty:0},
-          {id:32,cat:'Coadyuvante',name:'XION ACTIVEGEL',price:82.95,expiry:'2025-11-03',notes:'50 a 70 cc c/100 lt de agua',qty:0},
-          {id:33,cat:'Coadyuvante',name:'XION SILICONGEL',price:94.21,expiry:'2025-11-03',notes:'25-50cc/ha',qty:0},
-          {id:34,cat:'Fertilizante',name:'Amauta Micro (10-27)',price:2.20,expiry:'2025-08-07',notes:'',qty:0},
-          {id:35,cat:'Fertilizante',name:'Amauta Micro (10-40)',price:2.55,expiry:'2026-03-27',notes:'Sin tasa a dic 2026 (hasta 60 Tn)',qty:0},
-          {id:36,cat:'Fertilizante',name:'Amauta Micro + Plus (10-46)',price:2.70,expiry:'2025-08-07',notes:'Si +1000 kilos puesto a campo',qty:0},
-          {id:37,cat:'Fertilizante',name:'Novastart FBN BIO',price:0,expiry:'2025-11-27',notes:'x 20 - 600 y 1000 kilos - Fin a Julio sin Tasa',qty:0},
-          {id:38,cat:'Fertilizante',name:'Novastart Max',price:0,expiry:'',notes:'x 20 - 600 y 1000 kilos - Fin a Julio sin tasa',qty:0},
-          {id:39,cat:'Fertilizante foliar',name:'Maximum (N;Mo;Bo) x5L',price:30.00,expiry:'2025-01-21',notes:'',qty:0},
-          {id:40,cat:'Fertilizante foliar',name:'Microquel Amin Cuaje',price:13.34,expiry:'2025-08-07',notes:'Dosis 1,5 kg',qty:0},
-          {id:41,cat:'Fertilizante foliar',name:'Vigorion',price:13.50,expiry:'2025-08-07',notes:'1 a 2 litros /ha',qty:0},
-          {id:42,cat:'Fertilizante foliar',name:'Wayra K Plus',price:4.50,expiry:'2025-08-07',notes:'1 kilo + 0,5 l de vigorion',qty:0},
-          {id:43,cat:'Fertilizante foliar',name:'Wayra NS Amauta',price:2.82,expiry:'2025-08-07',notes:'Dosis 8 kilos/ha',qty:0},
-          {id:44,cat:'Fertilizante foliar',name:'Ziman',price:8.40,expiry:'2025-08-07',notes:'',qty:0},
-          {id:45,cat:'Fungicida',name:'Azoxcy PRO Insuagro',price:13.16,expiry:'2026-02-03',notes:'CyO',qty:0},
-          {id:46,cat:'Fungicida',name:'Freedom x 5L',price:13.15,expiry:'2026-02-03',notes:'250 cc/ha soja - 500 cc/ha Maiz',qty:0},
-          {id:47,cat:'Fungicida',name:'Miravis Duo',price:41.23,expiry:'2026-01-05',notes:'',qty:0},
-          {id:48,cat:'Fungicida',name:'Pancho Triple pack',price:304.50,expiry:'2025-02-13',notes:'pack x 20 has',qty:0},
-          {id:49,cat:'Fungicida',name:'Tebuco Delta 43',price:10.35,expiry:'2025-12-13',notes:'',qty:0},
-          {id:50,cat:'Fungicida Biológico',name:'Trichodermil Coppert',price:24.00,expiry:'2025-09-05',notes:'300cc/100kg sem soja',qty:0},
-          {id:51,cat:'Granos Almacenados',name:'K-obiol',price:47.25,expiry:'2026-01-13',notes:'Vencido, precio con descuento aplicado',qty:0},
-          {id:52,cat:'Granos Almacenados',name:'Onza Max',price:36.04,expiry:'2025-08-07',notes:'',qty:0},
-          {id:53,cat:'Granos Almacenados',name:'Quickphos (fosfuro de aluminio) - x tubo 30 pastillas',price:3.75,expiry:'2026-01-30',notes:'NO vender menos de 16 tubos (una lata)',qty:0},
-          {id:54,cat:'Herbicida',name:'2,4 D Etil Hexil (89%) DELTA x 20L',price:4.75,expiry:'2025-11-03',notes:'',qty:0},
-          {id:55,cat:'Herbicida',name:'2,4 D Etil Hexil 102,5%',price:0,expiry:'2025-11-03',notes:'',qty:0},
-          {id:56,cat:'Herbicida',name:'2,4 D Herbifen Advance',price:0,expiry:'2025-05-27',notes:'',qty:0},
-          {id:57,cat:'Herbicida',name:'2,4 D Voleris',price:6.10,expiry:'2025-12-20',notes:'',qty:0},
-          {id:58,cat:'Herbicida',name:'2,4D enlist',price:5.31,expiry:'2025-11-10',notes:'',qty:0},
-          {id:59,cat:'Herbicida',name:'Acuron Pack',price:464.02,expiry:'2025-10-18',notes:'',qty:0},
-          {id:60,cat:'Herbicida',name:'Acuron Uno',price:40.65,expiry:'2025-10-17',notes:'',qty:0},
-          {id:61,cat:'Herbicida',name:'Arkadia (isoxaflutol + mesotrione)',price:33.86,expiry:'2025-11-03',notes:'',qty:0},
-          {id:62,cat:'Herbicida',name:'Atrazina Atramyl x 15 kg',price:5.48,expiry:'2025-12-13',notes:'1 kg/ha',qty:0},
-          {id:63,cat:'Herbicida',name:'Atrazina Delta x10 kg',price:5.51,expiry:'2025-11-03',notes:'SOLO 10 KILOS DE STOCK',qty:0},
-          {id:64,cat:'Herbicida',name:'Atrazina Gesaprim 90 x10Kg',price:7.18,expiry:'2025-10-01',notes:'',qty:0},
-          {id:65,cat:'Herbicida',name:'BLADE NOVA fluroxipir',price:19.98,expiry:'2026-01-24',notes:'CyO',qty:0},
-          {id:66,cat:'Herbicida',name:'Borja',price:39.33,expiry:'2025-10-17',notes:'',qty:0},
-          {id:67,cat:'Herbicida',name:'Carfrentazone Affinity',price:95.04,expiry:'2025-08-07',notes:'',qty:0},
-          {id:68,cat:'Herbicida',name:'Cletodim 24 Delta x 20 Litros',price:0,expiry:'',notes:'SIN STOCK - Ver Cleto Nova',qty:0},
-          {id:69,cat:'Herbicida',name:'Cletodim nova 24% x 20 Lts',price:8.19,expiry:'2026-02-12',notes:'Stock Disponible',qty:0},
-          {id:70,cat:'Herbicida',name:'Cletodim Traspect (Syngenta) x 20 lts',price:0,expiry:'',notes:'',qty:0},
-          {id:71,cat:'Herbicida',name:'Clopyralid Nova',price:34.56,expiry:'2025-08-07',notes:'dosis: 120 a 200 cc',qty:0},
-          {id:72,cat:'Herbicida',name:'Clorimuron',price:60.50,expiry:'2025-08-07',notes:'',qty:0},
-          {id:73,cat:'Herbicida',name:'Convey',price:321.00,expiry:'2025-12-27',notes:'',qty:0},
-          {id:74,cat:'Herbicida',name:'Corsaire (Imazapic 31,8% + Imazapir 10,7%)',price:43.95,expiry:'2025-08-07',notes:'',qty:0},
-          {id:75,cat:'Herbicida',name:'Dicamba',price:7.16,expiry:'2025-11-03',notes:'',qty:0},
-          {id:76,cat:'Herbicida',name:'Diclosulam Delta x 1 kilo',price:156.60,expiry:'2025-10-07',notes:'',qty:0},
-          {id:77,cat:'Herbicida',name:'Diclosulam Spider',price:237.62,expiry:'2025-08-21',notes:'',qty:0},
-          {id:78,cat:'Herbicida',name:'Diclosulam x 0,5 kg',price:158.05,expiry:'2025-09-05',notes:'',qty:0},
-          {id:79,cat:'Herbicida',name:'Diflufenican 50%',price:24.84,expiry:'2025-10-21',notes:'',qty:0},
-          {id:80,cat:'Herbicida',name:'Diuron',price:13.75,expiry:'2025-08-22',notes:'',qty:0},
-          {id:81,cat:'Herbicida',name:'Dual Gold (S-Metalocloro)',price:10.75,expiry:'2024-08-15',notes:'',qty:0},
-          {id:82,cat:'Herbicida',name:'Fierce (Flumioxazin 15% + Pyroxasulfone 34,5%)',price:73.70,expiry:'2025-09-05',notes:'',qty:0},
-          {id:83,cat:'Herbicida',name:'Finesse / Stern',price:251.00,expiry:'2025-07-15',notes:'vence Feb 2026',qty:0},
-          {id:84,cat:'Herbicida',name:'Flumioxazin 48%',price:19.80,expiry:'2025-11-03',notes:'',qty:0},
-          {id:85,cat:'Herbicida',name:'Fomesafen Atanor x 10 Lt',price:6.30,expiry:'2025-09-29',notes:'vencido - Nov 2025',qty:0},
-          {id:86,cat:'Herbicida',name:'Fomesafen x 20lt',price:6.91,expiry:'2025-11-03',notes:'',qty:0},
-          {id:87,cat:'Herbicida',name:'Gemmit Top (Flumi)',price:34.50,expiry:'2024-10-15',notes:'',qty:0},
-          {id:88,cat:'Herbicida',name:'Glifo Control Max 79.2% -Bayer-',price:6.45,expiry:'2025-12-30',notes:'',qty:0},
-          {id:89,cat:'Herbicida',name:'Glifo G62 Tecnomyl sal62%',price:4.06,expiry:'2026-02-12',notes:'',qty:0},
-          {id:90,cat:'Herbicida',name:'Glifo La Tijereta Box',price:0,expiry:'',notes:'SIN STOCK - Ver Control Max o Touchdown',qty:0},
-          {id:91,cat:'Herbicida',name:'Glifo Power Plus atanor 64,5%',price:0,expiry:'',notes:'SIN STOCK - Ver G62',qty:0},
-          {id:92,cat:'Herbicida',name:'Glifo Sulfosato TD 62%',price:4.35,expiry:'2025-12-30',notes:'',qty:0},
-          {id:93,cat:'Herbicida',name:'Glifo Touchdown Max 75.2% -Syngenta- x 10 kilos',price:6.12,expiry:'2025-12-30',notes:'',qty:0},
-          {id:94,cat:'Herbicida',name:'Glufosinato de amonio 60% Helios Plus x 20 Litros',price:10.94,expiry:'2026-01-02',notes:'Dosis 0,5-0,7L/Ha - SIN STOCK',qty:0},
-          {id:95,cat:'Herbicida',name:'Glufosinato de Amonio Delta/Insuagro 20%',price:0,expiry:'2025-11-03',notes:'SIN STOCK - Ver Helios',qty:0},
-          {id:96,cat:'Herbicida',name:'Haloxi 81%',price:29.00,expiry:'2025-06-23',notes:'Vencido Nov 2024',qty:0},
-          {id:97,cat:'Herbicida',name:'Haloxifop 54%',price:19.80,expiry:'2025-08-22',notes:'',qty:0},
-          {id:98,cat:'Herbicida',name:'Haloxifop 54% Delta CyO',price:18.45,expiry:'2025-10-07',notes:'',qty:0},
-          {id:99,cat:'Herbicida',name:'Haloxifop 93,5%',price:34.65,expiry:'2025-08-22',notes:'',qty:0},
-          {id:100,cat:'Herbicida',name:'Haloxifop 90% Galant max',price:44.23,expiry:'2025-10-21',notes:'',qty:0},
-          {id:101,cat:'Herbicida',name:'Heat',price:317.52,expiry:'2025-11-27',notes:'',qty:0},
-          {id:102,cat:'Herbicida',name:'Imazapir 48 Delta',price:0,expiry:'2025-10-07',notes:'SIN STOCK - Ver Maza',qty:0},
-          {id:103,cat:'Herbicida',name:'Imazapir 48% Maza GLEBA',price:33.32,expiry:'2025-12-23',notes:'',qty:0},
-          {id:104,cat:'Herbicida',name:'Imazetapyr 10% (Delta)',price:4.75,expiry:'2025-10-07',notes:'SIN STOCK - Ver Xcalivur',qty:0},
-          {id:105,cat:'Herbicida',name:'Imazetapyr 10% Xcalibur (Nova) 4x5Lts',price:4.87,expiry:'2025-11-21',notes:'',qty:0},
-          {id:106,cat:'Herbicida',name:'Ligate',price:165.00,expiry:'2025-10-20',notes:'',qty:0},
-          {id:107,cat:'Herbicida',name:'Metribuzin Insuagro',price:0,expiry:'2024-09-20',notes:'',qty:0},
-          {id:108,cat:'Herbicida',name:'Metribuzin 70 wg Tribune solido',price:0,expiry:'2024-10-22',notes:'',qty:0},
-          {id:109,cat:'Herbicida',name:'Metsulfuron',price:0,expiry:'2025-05-12',notes:'',qty:0},
-          {id:110,cat:'Herbicida',name:'Nicosulfuron 75% (sobre 200Gr.)',price:150.12,expiry:'2025-11-03',notes:'',qty:0},
-          {id:111,cat:'Herbicida',name:'Nicosulfuron 75% Delta (sobre 200Gr. o x 300 gr)',price:147.15,expiry:'2025-11-03',notes:'',qty:0},
-          {id:112,cat:'Herbicida',name:'Nicosulfuron LPU 4% (Insuagro)',price:12.27,expiry:'2025-12-30',notes:'Dosis: 1 a 1,1 Litros',qty:0},
-          {id:113,cat:'Herbicida',name:'Ontario (Imazapir 30,4%) NOVA',price:24.20,expiry:'2025-08-07',notes:'',qty:0},
-          {id:114,cat:'Herbicida',name:'On duty',price:122.36,expiry:'2024-10-28',notes:'',qty:0},
-          {id:115,cat:'Herbicida',name:'Pacto x 360gr',price:421.72,expiry:'2025-01-29',notes:'50 gr/ha Para Rama Negra',qty:0},
-          {id:116,cat:'Herbicida',name:'Paraquat x 20 litros',price:3.47,expiry:'2025-12-13',notes:'STOCK A CONFIRMAR',qty:0},
-          {id:117,cat:'Herbicida',name:'Percutor',price:275.00,expiry:'2025-10-21',notes:'',qty:0},
-          {id:118,cat:'Herbicida',name:'Picloram Nova',price:6.70,expiry:'2025-12-13',notes:'',qty:0},
-          {id:119,cat:'Herbicida',name:'Piroxasulfone 48% YAMATO TOP',price:87.58,expiry:'2025-11-10',notes:'',qty:0},
-          {id:120,cat:'Herbicida',name:'Piroxasulfone 85% Nova',price:140.40,expiry:'2025-10-21',notes:'',qty:0},
-          {id:121,cat:'Herbicida',name:'Preludio (haloxifop 20%+Quizalofop 20%+version)',price:174.37,expiry:'2025-12-22',notes:'pack para 20 has',qty:0},
-          {id:122,cat:'Herbicida',name:'Prometrina',price:6.96,expiry:'2025-09-11',notes:'',qty:0},
-          {id:123,cat:'Herbicida',name:'S-Metalocloro Delta',price:6.29,expiry:'2025-11-03',notes:'',qty:0},
-          {id:124,cat:'Herbicida',name:'S-Metalocloro genérico x 20 L',price:6.62,expiry:'2025-12-23',notes:'',qty:0},
-          {id:125,cat:'Herbicida',name:'sulfentrazone Capaz/Solara',price:20.62,expiry:'2025-10-07',notes:'',qty:0},
-          {id:126,cat:'Herbicida',name:'Terbutilazina 50 DELTA o Insuagro',price:6.73,expiry:'2025-11-03',notes:'',qty:0},
-          {id:127,cat:'Herbicida',name:'Terbyne 75',price:12.89,expiry:'',notes:'',qty:0},
-          {id:128,cat:'Herbicida',name:'Velocity 54%',price:20.95,expiry:'2025-09-05',notes:'',qty:0},
-          {id:129,cat:'Herbicida',name:'Voleris',price:5.61,expiry:'2025-11-21',notes:'',qty:0},
-          {id:130,cat:'Herbicida',name:'Voraxor',price:127.90,expiry:'2025-11-15',notes:'',qty:0},
-          {id:131,cat:'Herbicida',name:'Zidua PAck',price:792.05,expiry:'2024-09-20',notes:'',qty:0},
-          {id:132,cat:'Inoculante',name:'Nitrasilo (Pcio x frasco de 300 gr)',price:135.00,expiry:'2025-02-24',notes:'300 grs/silo cada 200 Tn',qty:0},
-          {id:133,cat:'Insecticida',name:'Abamectina 1,8%',price:6.10,expiry:'2025-10-07',notes:'',qty:0},
-          {id:134,cat:'Insecticida',name:'Abamectina 3,6%',price:10.58,expiry:'2025-12-13',notes:'100-150 cc/ha',qty:0},
-          {id:135,cat:'Insecticida',name:'Bifentrin 25% Delta 12x1L',price:17.28,expiry:'2025-11-03',notes:'',qty:0},
-          {id:136,cat:'Insecticida',name:'Bifentrin Nova 10%',price:7.34,expiry:'2025-10-01',notes:'',qty:0},
-          {id:137,cat:'Insecticida',name:'Clorantraniliprole 20% 12x1 Lt',price:50.00,expiry:'2026-02-18',notes:'',qty:0},
-          {id:138,cat:'Insecticida',name:'Clorantraniliprole 20% GLOCK (generico)',price:50.00,expiry:'2026-02-18',notes:'',qty:0},
-          {id:139,cat:'Insecticida',name:'Coragen/Vesticor',price:76.30,expiry:'2025-12-23',notes:'',qty:0},
-          {id:140,cat:'Insecticida',name:'Cyclon Nova (Imida 20%+Lambda 7,5%+Bifentrin 5%)',price:28.34,expiry:'',notes:'200 cc/ha',qty:0},
-          {id:141,cat:'Insecticida',name:'Dimetoato Delta (40%)',price:7.99,expiry:'2025-11-03',notes:'800 cc/ha',qty:0},
-          {id:142,cat:'Insecticida',name:'Exalt',price:206.15,expiry:'2025-12-04',notes:'',qty:0},
-          {id:143,cat:'Insecticida',name:'Expedition/Silver',price:41.01,expiry:'2025-01-20',notes:'200 cc/ha',qty:0},
-          {id:144,cat:'Insecticida',name:'Furia (Zetametrina)',price:12.60,expiry:'2025-10-07',notes:'Vencido',qty:0},
-          {id:145,cat:'Insecticida',name:'Hellion (Lufenuron 16% + Benzoato emamectina 4%) x 1L',price:64.42,expiry:'2025-08-07',notes:'120 cc/ha',qty:0},
-          {id:146,cat:'Insecticida',name:'Kaiser - Excelso (tiametoxam 14% + lambda 10,6) x5L',price:16.65,expiry:'2026-02-03',notes:'200 cc/ha',qty:0},
-          {id:147,cat:'Insecticida',name:'Lufen + Profenofos Delta',price:15.66,expiry:'2025-08-07',notes:'500 cc/ha',qty:0},
-          {id:148,cat:'Insecticida',name:'Lufenuron 5% Natiur (Gleba)',price:7.72,expiry:'2025-12-13',notes:'',qty:0},
-          {id:149,cat:'Insecticida',name:'Manto Lamdacialotrina',price:20.30,expiry:'2025-12-23',notes:'',qty:0},
-          {id:150,cat:'Insecticida',name:'Metoxifenocide 24% INTREPID',price:31.90,expiry:'2025-10-07',notes:'',qty:0},
-          {id:151,cat:'Insecticida',name:'Metoxifenocide 24% Vest',price:24.09,expiry:'2025-10-07',notes:'',qty:0},
-          {id:152,cat:'Insecticida',name:'Pirate (Clorfenapir 24g)',price:19.80,expiry:'2025-12-04',notes:'800cc/ha',qty:0},
-          {id:153,cat:'Insecticida',name:'Transform (sufloxaflor)',price:243.86,expiry:'2026-02-05',notes:'40 gr/ha',qty:0},
-          {id:154,cat:'Insecticida',name:'Troya',price:32.55,expiry:'2025-01-20',notes:'175 a 220 cc/ha',qty:0},
-          {id:155,cat:'Insecticida',name:'Virantra x5 Lt',price:275.00,expiry:'2026-01-19',notes:'',qty:0},
-          {id:156,cat:'Insecticida',name:'Zodiac (Bifentrin 5%+Lufenuron 5%+Abamectina 0,7%)',price:22.00,expiry:'2025-03-19',notes:'300 cc/ha',qty:0},
-          {id:157,cat:'Otros',name:'Trampa Amarilla Horiver (x10 unidades)',price:25.00,expiry:'2026-01-14',notes:'',qty:0},
-          {id:158,cat:'Semilla',name:'Centeno C&N (U$S/kg)',price:0,expiry:'',notes:'big bags de 800 kilos',qty:0},
-          {id:159,cat:'Semilla',name:'Semilla de Trigo (Mancosem)',price:22.35,expiry:'2025-03-11',notes:'pcio x bolsa de 40 kilos',qty:0},
-          {id:160,cat:'Semilla',name:'Vicia C&N (U$S/kg)',price:2.00,expiry:'2025-03-11',notes:'En Big bags de 500 kilos',qty:0},
-          {id:161,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 100 m',price:480.00,expiry:'2026-03-27',notes:'',qty:0},
-          {id:162,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 100 m (x mas de 10)',price:472.94,expiry:'2025-03-28',notes:'',qty:0},
-          {id:163,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 75 m',price:374.50,expiry:'2026-03-27',notes:'',qty:0},
-          {id:164,cat:'Silos bolsa',name:'Silobolsa IPESA Reforzado 9 pies x 75 m (x mas de 10)',price:359.64,expiry:'2026-02-03',notes:'',qty:0},
-          {id:165,cat:'Terápico semilla',name:'Apron maxx RFC x1l',price:50.80,expiry:'2024-08-22',notes:'',qty:0},
-          {id:166,cat:'Terápico semilla',name:'cruiser 60 x 20L',price:117.70,expiry:'2024-08-22',notes:'',qty:0},
-          {id:167,cat:'Terápico semilla',name:'Cruiser Plus',price:56.42,expiry:'2025-03-13',notes:'',qty:0},
-          {id:168,cat:'Terápico semilla',name:'Fipronil Action (fipronil 20%) TS',price:60.00,expiry:'2026-03-25',notes:'',qty:0},
-          {id:169,cat:'Terápico semilla',name:'Fiproxam Pack (2000Kg)',price:322.00,expiry:'2024-11-15',notes:'',qty:0},
-          {id:170,cat:'Terápico semilla',name:'Options Pack (4000Kg)',price:259.84,expiry:'2024-11-21',notes:'',qty:0},
-          {id:171,cat:'Terápico semilla',name:'Origen Pack',price:185.60,expiry:'2024-10-05',notes:'',qty:0},
-          {id:172,cat:'Terápico semilla',name:'Pack BIO DUO (2000kg)',price:185.60,expiry:'2024-08-12',notes:'',qty:0},
-          {id:173,cat:'Terápico semilla trigo',name:'Amigo (difeno + metalaxil)',price:25.30,expiry:'2026-04-01',notes:'150 cc/100 kg',qty:0},
-          {id:174,cat:'Terápico semilla trigo',name:'Azokop-L (vejigas x 2,5L)',price:0,expiry:'',notes:'Pcio x litro - 1 vejiga cada 500 kilos',qty:0},
-          {id:175,cat:'Terápico semilla trigo',name:'BIOKOP PACK TRIGO (Trichoderma+azospirillum)',price:78.00,expiry:'2026-04-01',notes:'1 caja c/1000 kilos',qty:0},
-          {id:176,cat:'Terápico semilla trigo',name:'Criollo (tebuco + imida)',price:14.04,expiry:'2026-04-01',notes:'Dosis 200cc c/100 kilos',qty:0},
-          {id:177,cat:'Terápico semilla trigo',name:'Curasemillas Nova (Thiram+carbendazim)',price:4.44,expiry:'2026-04-01',notes:'Dosis 250 cc c/100 kilos',qty:0},
-          {id:178,cat:'Terápico semilla trigo',name:'Flight (Difeno+imida)',price:20.70,expiry:'2026-04-01',notes:'Dosis 250 cc c/100 kilos',qty:0},
-          {id:179,cat:'Terápico semilla trigo',name:'PACK TRIGO (carbendazim+thiram+Azospirillum)',price:54.00,expiry:'2026-04-01',notes:'1 caja c/1000 kilos',qty:0},
-          {id:180,cat:'Terápico semilla trigo',name:'Promozion de Nova (Azospirillum) x caja',price:122.40,expiry:'2026-04-01',notes:'1 caja c/4000 kilos',qty:0},
-          {id:181,cat:'Terápico semilla trigo',name:'Tregua (Nuevo) Difeno+metalaxil+iprodione+imida',price:28.75,expiry:'2026-04-01',notes:'400 a 500 cc/100 kg',qty:0}
-        ];
 
         // Helpers de vencimiento
         const getExpiryStatus = (expiryStr) => {
@@ -317,18 +109,18 @@
             const [view, setView] = useState('quote'); // 'quote' | 'admin' | 'stock'
             const [sheetsStatus, setSheetsStatus] = useState('idle'); // 'idle' | 'loading' | 'ok' | 'error'
 
-            // Inicializar desde localStorage (como caché)
+            // Inicializar desde localStorage (como caché), o con arrays vacíos
             const [maizePrices, setMaizePrices] = useState(() => {
                 const s = localStorage.getItem('grain_maize');
-                return s ? JSON.parse(s) : INITIAL_MZ;
+                return s ? JSON.parse(s) : [];
             });
             const [sunflowerPrices, setSunflowerPrices] = useState(() => {
                 const s = localStorage.getItem('grain_sunflower');
-                return s ? JSON.parse(s) : INITIAL_GS;
+                return s ? JSON.parse(s) : [];
             });
             const [stockData, setStockData] = useState(() => {
                 const s = localStorage.getItem('grain_stock');
-                return s ? JSON.parse(s) : INITIAL_STOCK;
+                return s ? JSON.parse(s) : [];
             });
 
             // Cargar desde Google Sheets al montar
@@ -337,9 +129,9 @@
                     setSheetsStatus('loading');
                     try {
                         const [resMz, resGs, resStock] = await Promise.all([
-                            fetch(SHEETS_BASE + 'Maiz'),
-                            fetch(SHEETS_BASE + 'Girasol'),
-                            fetch(SHEETS_BASE + 'Stock')
+                            fetch(SHEETS_BASE + SHEET_GIDS.Maiz),
+                            fetch(SHEETS_BASE + SHEET_GIDS.Girasol),
+                            fetch(SHEETS_BASE + SHEET_GIDS.Stock)
                         ]);
 
                         if (!resMz.ok || !resGs.ok || !resStock.ok) throw new Error('HTTP error');
@@ -350,7 +142,15 @@
 
                         const mz = parseCSV(txtMz).map(r => ({ id: r.id, price: parseFloat(r.price) || 0 }));
                         const gs = parseCSV(txtGs).map(r => ({ id: r.id, price: parseFloat(r.price) || 0 }));
-                        const stock = parseCSV(txtStock).map(r => ({
+                        const stockRaw = parseCSV(txtStock);
+
+                        // Validar que la hoja Stock sea realmente stock (tiene columna 'name' o similar)
+                        const stockValid = stockRaw.filter(r => r.name && r.name.trim() !== '');
+                        if (stockRaw.length > 0 && stockValid.length === 0) {
+                            console.warn('⚠️ La hoja Stock devolvió datos incorrectos. Primer fila parseada:', stockRaw[0]);
+                        }
+
+                        const stock = stockValid.map(r => ({
                             id: parseInt(r.id) || Date.now(),
                             cat: r.cat || '',
                             name: r.name || '',
@@ -362,7 +162,16 @@
 
                         if (mz.length > 0) { setMaizePrices(mz); localStorage.setItem('grain_maize', JSON.stringify(mz)); }
                         if (gs.length > 0) { setSunflowerPrices(gs); localStorage.setItem('grain_sunflower', JSON.stringify(gs)); }
-                        if (stock.length > 0) { setStockData(stock); localStorage.setItem('grain_stock', JSON.stringify(stock)); }
+                        if (stock.length > 0) {
+                            setStockData(stock);
+                            localStorage.setItem('grain_stock', JSON.stringify(stock));
+                        } else {
+                            // Stock inválido: mantener caché local
+                            console.warn('Stock de Sheets inválido o vacío, usando datos locales.');
+                        }
+
+                        // Reporte diagnóstico en consola
+                        console.log(`📊 Sheets cargado → Maíz: ${mz.length} | Girasol: ${gs.length} | Stock: ${stock.length} ítems`);
 
                         setSheetsStatus('ok');
                     } catch (err) {
@@ -373,14 +182,7 @@
                 fetchSheets();
             }, []);
 
-            // Guardar precios a localStorage (panel Admin)
-            const savePrices = (mz, gs) => {
-                localStorage.setItem('grain_maize', JSON.stringify(mz));
-                localStorage.setItem('grain_sunflower', JSON.stringify(gs));
-                setMaizePrices(mz);
-                setSunflowerPrices(gs);
-                alert("Precios guardados con éxito.");
-            };
+            // savePrices ya no se usa (precios solo desde Google Sheets)
 
             const styles = {
                 header: { backgroundColor: '#0f4d22', padding: '15px 30px', color: '#d4af37', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
@@ -390,9 +192,9 @@
             };
 
             const statusBadge = {
-                loading: { text: '⏳ Sincronizando con Sheets...', color: '#856404', bg: '#fff3cd' },
-                ok:      { text: '✅ Datos actualizados desde Google Sheets', color: '#155724', bg: '#d4edda' },
-                error:   { text: '⚠️ Sin conexión a Sheets — usando datos locales', color: '#721c24', bg: '#f8d7da' },
+                loading: { text: '⏳ Sincronizando precios con Google Sheets...', color: '#856404', bg: '#fff3cd' },
+                ok:      { text: '✅ Precios actualizados desde Google Sheets — Los precios se editan solo desde la planilla de cálculo', color: '#155724', bg: '#d4edda' },
+                error:   { text: '⚠️ Sin conexión a Google Sheets — Se están usando los precios almacenados localmente. Verificá tu conexión a internet o que la planilla esté publicada correctamente.', color: '#721c24', bg: '#f8d7da' },
             }[sheetsStatus];
 
             return (
@@ -401,7 +203,6 @@
                         <h1 style={styles.title}>GRAIN - Semillas NK</h1>
                         <div>
                             <button style={view === 'quote' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('quote')}>Cotizador</button>
-                            <button style={view === 'admin' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('admin')}>Administrar Precios</button>
                             <button style={view === 'stock' ? styles.activeNavBtn : styles.navBtn} onClick={() => setView('stock')}>📦 Stock</button>
                         </div>
                     </div>
@@ -411,7 +212,6 @@
                         </div>
                     )}
                     {view === 'quote' && <QuoteGenerator maizePrices={maizePrices} sunflowerPrices={sunflowerPrices} stockData={stockData} />}
-                    {view === 'admin' && <PriceAdmin maizePrices={maizePrices} sunflowerPrices={sunflowerPrices} onSave={savePrices} />}
                     {view === 'stock' && <StockManager stockData={stockData} setStockData={setStockData} />}
                 </div>
             );
@@ -632,8 +432,8 @@
             const [preCampaign, setPreCampaign] = useState(12);
             const [empowerment, setEmpowerment] = useState(0);
             const [paymentCondition, setPaymentCondition] = useState('CDO/Tarjeta/Préstamo/Canje Disponible');
-            const [rows, setRows] = useState([{ id: 1, type: 'MZ', hybrid: maizePrices[0].id, band: 'B1', quantity: 1, obs: '' }]);
-            
+            // Inicializamos sin productos por defecto
+            const [rows, setRows] = useState([]);
             const [seedsComment, setSeedsComment] = useState('');
             const [insumosComment, setInsumosComment] = useState('');
 
@@ -1038,7 +838,14 @@
 
         // --- COMPONENTE STOCK MANAGER ---
         function StockManager({ stockData, setStockData }) {
-            const [items, setItems] = useState(stockData || INITIAL_STOCK);
+            const [items, setItems] = useState(stockData || []);
+
+            // Sincronizar items cuando stockData se actualiza desde Google Sheets
+            useEffect(() => {
+                if (stockData && stockData.length > 0) {
+                    setItems(stockData);
+                }
+            }, [stockData]);
             const [search, setSearch] = useState('');
             const [filterCat, setFilterCat] = useState('Todas');
             const [filterExpiry, setFilterExpiry] = useState('Todos');
